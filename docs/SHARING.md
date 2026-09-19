@@ -1,0 +1,67 @@
+# Sharing your handle
+
+The point of a handle is to be posted. Making that one tap is a core feature,
+not a nicety.
+
+## Link
+
+```
+https://halp.to/h/e7k4p2m9qx3v
+```
+
+Opening it in any browser gives a page with one large button. A first-time
+visitor is provisioned an account in the background (proof-of-work, key kept in
+`localStorage`, revealed afterwards), so sending works in a single tap with no
+signup wall while still being rate-limitable per sender.
+
+The page must render without JavaScript for the preview crawlers, and must not
+leak anything about the owner: no display name, no counts unless the owner
+enabled the public counter, no "this handle does not exist" distinction from
+"this handle is paused" (uniform response, uniform timing).
+
+Rich previews: OpenGraph and Twitter card tags so a pasted link looks right in
+Slack, Discord and social feeds.
+
+## QR code
+
+Generated client-side from the handle URL — the server never needs to be
+involved. Offered as PNG and SVG, with a printable card layout (conference
+badge, desk sign, sticker) and a "new handle for this QR" shortcut so a QR you
+printed for one event can be burned afterwards.
+
+## GitHub / README badge
+
+```markdown
+[![Halp](https://halp.to/badge/e7k4p2m9qx3v.svg)](https://halp.to/h/e7k4p2m9qx3v)
+```
+
+An SVG served with shields-style caching. Note the constraint: GitHub proxies
+images through Camo, so the badge **cannot** be a working button and cannot see
+the viewer — it is an image that links to the handle page. The click is where
+the ping happens.
+
+Badge variants: plain ("appreciate me"), or with a lifetime received count if
+the owner opts in. That count is a single aggregate integer on the account, not
+derived from any ping record. Cache headers must be long enough that a popular
+README does not become a traffic source of its own.
+
+## Live streaming
+
+Phase 3, but it shapes the design now because it is the same fan-out.
+
+* **OBS browser source.** A URL with a read-only overlay token (not the handle,
+  so it can be revoked without changing the handle) that subscribes over SSE and
+  renders an animation or a counter. Configurable: pop-in, meter, subtle corner
+  count. This is the same SSE hub the desktop client uses.
+* **Digest-driven, always.** A streamer's handle runs a short digest window so
+  the overlay animates once with "37 people appreciate you" rather than 37
+  times. Directly reuses [DELIVERY.md](DELIVERY.md).
+* **Chat bot.** Twitch/YouTube bot that posts the streamer's handle link on
+  command. Keep it a thin client of the public API — no special server support.
+* **Stream-specific handle**, burnable after a raid goes wrong, which is the
+  single most likely abuse scenario in this whole product.
+
+Cost note: a live stream is precisely the "one handle, enormous inbound"
+scenario, so the automatic escalation in [DELIVERY.md](DELIVERY.md) and the
+per-handle PoW escalation in [ABUSE.md](ABUSE.md) must both be in place before
+this ships. Do not build the overlay first.

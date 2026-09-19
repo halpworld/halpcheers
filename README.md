@@ -1,0 +1,42 @@
+# Halp
+
+**Someone appreciates you.**
+
+Halp is an ultra-lightweight notification utility with exactly one function: let a
+person send another person an anonymous appreciation ping. No text, no images, no
+reason, no sender identity. One fixed idea, delivered.
+
+* **Zero payload.** The notification content is constant. There is nothing to write.
+* **Anonymous to the recipient.** The recipient never learns who appreciated them.
+* **No message history.** Nothing is stored about a ping once it is dispatched.
+* **Small.** The server is a single Go binary plus one SQLite file. It is meant to
+  run comfortably on a $10–20/month VPS.
+
+## Status
+
+Design phase. No code yet. The full plan lives in [`docs/`](docs/).
+
+| Doc | What's in it |
+| --- | --- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System shape, request path, capacity budget |
+| [docs/IDENTITY.md](docs/IDENTITY.md) | Account keys, handles, aliases, regions |
+| [docs/ABUSE.md](docs/ABUSE.md) | The defence stack — the most important document here |
+| [docs/DELIVERY.md](docs/DELIVERY.md) | Transports, coalescing, digest policy |
+| [docs/GROUPS.md](docs/GROUPS.md) | Teams and group-scoped handles |
+| [docs/SHARING.md](docs/SHARING.md) | Links, QR, badges, live-stream overlays |
+| [docs/PRIVACY.md](docs/PRIVACY.md) | GDPR posture, data inventory, multi-region |
+| [docs/API.md](docs/API.md) | HTTP surface and SQLite schema |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Phasing and milestones |
+| [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | Decisions still outstanding |
+
+Engineering rules that must not be violated are in [AGENTS.md](AGENTS.md).
+
+## Platforms
+
+Phase 1 targets **web, browser extensions (Chrome / Firefox / Safari), desktop
+(Windows / macOS / Linux) and a TUI**. Mobile is phase 2, pending a feasibility
+call — the repository reserves `mobile/` for it.
+
+## Licence
+
+See [LICENSE](LICENSE).
