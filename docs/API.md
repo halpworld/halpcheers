@@ -119,7 +119,8 @@ CREATE TABLE accounts (
   last_seen_day INTEGER NOT NULL,
   send_tier     INTEGER NOT NULL DEFAULT 0,
   suspended     INTEGER NOT NULL DEFAULT 0,
-  recv_total    INTEGER NOT NULL DEFAULT 0   -- aggregate only, for the badge
+  recv_total    INTEGER NOT NULL DEFAULT 0   -- aggregate only; counted from day one,
+                                            -- not exposed publicly in phase 1
 );
 
 CREATE TABLE handles (

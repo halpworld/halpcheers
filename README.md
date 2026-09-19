@@ -28,14 +28,18 @@ Design phase. No code yet. The full plan lives in [`docs/`](docs/).
 | [docs/PRIVACY.md](docs/PRIVACY.md) | GDPR posture, data inventory, multi-region |
 | [docs/API.md](docs/API.md) | HTTP surface and SQLite schema |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phasing and milestones |
-| [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | Decisions still outstanding |
+| [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | Decisions made, and the ones still outstanding |
 
 Engineering rules that must not be violated are in [AGENTS.md](AGENTS.md).
 
 ## Platforms
 
-Phase 1 targets **web, browser extensions (Chrome / Firefox / Safari), desktop
-(Windows / macOS / Linux) and a TUI**. Mobile is phase 2, pending a feasibility
+Phase 1 targets **web, browser extensions (Chrome / Firefox) and the desktop
+app (macOS / Windows / Linux)**. The TUI follows in phase 2.
+
+There is no Safari extension: the Push API inside Safari web extensions was the
+weakest assumption in the plan, so Safari users get the web app over Safari Web
+Push plus the desktop app instead. Mobile is phase 4, pending a feasibility
 call — the repository reserves `mobile/` for it.
 
 ## Licence

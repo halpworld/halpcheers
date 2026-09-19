@@ -52,20 +52,42 @@ defaults and are runtime-configurable.
 | Limit | Default | Purpose |
 | --- | --- | --- |
 | Per sender account | 20/hour, 100/day | one person cannot be a firehose |
-| **Per (sender, recipient) pair** | **1 per 24 h** | the important one |
+| **Per (sender, recipient) pair** | **3 per 24 h**, 10 for `stream` handles | the important one |
 | Per handle, inbound | configurable cap on *deliveries*/hour | protects the recipient |
 | Per alias, inbound | stricter than the handle behind it | aliases are guessable |
 | Per IP, signup | leaky bucket + PoW | Sybil brake |
 | Per IP, login attempts | leaky bucket + PoW + uniform errors | credential guessing |
-| Per group, member→member | 1 per 24 h, plus a group-wide cap | groups are a directory |
+| Per group, member→member | the pair limit, scoped to the group handle, plus a group-wide cap | groups are a directory |
 
-**The pair limit is the heart of it.** One ping per person per day makes the
-signal mean something and makes a single-source flood impossible by
-construction. It is implemented as a double-buffered Bloom filter over
-`HMAC(rotating_daily_key, sender_id ‖ handle)`, two 24 h windows rotating, sized
-for ≤0.1% false positives. A false positive silently drops a legitimate ping —
-acceptable for this product, and a reason to keep the filter generously sized
-and alerted on fill ratio.
+**The pair limit is the heart of it.** A small number of pings per person per
+day makes the signal mean something and makes a single-source flood impossible
+by construction.
+
+The first draft set it to exactly 1 per 24 h. That was too tight — a five-person
+team could send you at most five pings a day, and a conference QR code wants a
+different rule from a personal handle — so it is now a configured maximum per
+window, defaulting per handle kind:
+
+| Handle kind | `guard.pair.max` | Window |
+| --- | --- | --- |
+| `personal` | 3 | 24 h |
+| `social` | 3 | 24 h |
+| `group` | 3 | 24 h |
+| `stream` | 10 | 24 h |
+
+**Counting to three changes the structure.** A Bloom filter answers "seen or
+not" and cannot count. The implementation is a **cascade of `pair.max` filters
+per window** over `HMAC(rotating_daily_key, sender_id ‖ handle)`: check slot 1,
+and if the pair is already there check slot 2, and so on; insert into the first
+free slot and accept; reject when every slot is occupied. Two 24 h windows
+rotate as before, each filter sized for ≤0.1% false positives. Lookup stays O(1)
+with a constant of at most `pair.max` hashes, and `pair.max = 1` is exactly the
+original design.
+
+The failure direction is unchanged and it is the safe one: a false positive
+advances a slot, so a sender can only ever get *fewer* pings than their quota,
+never more. A legitimate ping is silently dropped — acceptable for this product,
+and a reason to keep the filters generously sized and alerted on fill ratio.
 
 Rejections return `202` too. A spammer should not be able to tell a delivered
 ping from a dropped one; feedback is what lets an attacker tune. Real senders
@@ -134,6 +156,14 @@ Ban lists, sketches and filters must be **fixed-size allocations chosen at
 startup from config**, never unbounded maps keyed by user input. An abuse
 defence that OOMs the box under attack is an amplification vector, not a
 defence.
+
+Launch sizing is driven by `guard.expected_daily_pings = 1000`. At ~2 bytes per
+entry that is kilobytes per filter, so the allocation carries a **floor of 1 MiB
+per cascade slot per window** whatever the config says: it is cheap enough to
+over-provision by two orders of magnitude, and the floor means a mistyped config
+value is harmless rather than silently producing a filter that is full on day
+one. Total pair-filter footprint at launch: `2 windows × pair.max slots × 1 MiB`
+≈ 6 MiB. See the tunables table in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## What we deliberately do not build
 

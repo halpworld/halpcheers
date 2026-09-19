@@ -3,41 +3,8 @@
 Decisions still outstanding, and assumptions made in the plan that are worth
 challenging. Resolve the blocking ones before Phase 1 code.
 
-## Blocking Phase 1
-
-1. **Safari Web Push inside web extensions.** Support for the Push API in Safari
-   web extensions is the weakest assumption in the whole platform plan. Verify
-   against current Apple documentation and a real device before promising Safari
-   extension support. Fallback: Safari Web Push for the web app plus the desktop
-   app, and no Safari extension.
-2. **RFC 8291 ephemeral key reuse.** If an application server may reuse its ECDH
-   keypair per subscription, the shared secret can be cached and the per-message
-   cost collapses to AES-GCM. If it may not, the payloadless-by-default strategy
-   carries the CPU budget on its own. Read the RFC and decide; do not guess.
-3. **Pair-limit window.** 1 ping per person per 24 h is proposed because it
-   makes the signal mean something. It also means a team of five can send you at
-   most five pings a day, which may be too tight, and a conference QR code may
-   want a different rule. Confirm 24 h, or make it per-handle-kind.
-4. **`expected_daily_pings` at launch.** Sizes the Bloom filter allocation. A
-   guess is fine; an unbounded structure is not.
-5. **Domain.** `halp.to` is a placeholder used throughout the docs.
-
-## Product
-
-6. **Digest defaults.** 60 s window / 12 per hour is a guess. It should probably
-   be validated with a handful of real users before it becomes the default
-   everyone inherits.
-7. **Does the sender see anything at all?** Currently a uniform 202 and a
-   "sent!" animation, whether or not it was delivered. Honest alternative: "sent
-   — they may receive it as part of a digest". Silent-drop-on-block is a
-   deliberate anti-abuse choice; be comfortable that it also means an
-   occasional honest sender is lied to.
-8. **Public received counter.** Opt-in on the badge. Does it turn appreciation
-   into a scoreboard, which the non-goals list explicitly rejects elsewhere?
-9. **Minimum group size of 5** to prevent deanonymisation by inference. Is that
-   the right number, and is disabling group pings below it too blunt?
-10. **Alias policy.** One per account, 12-month squatting release, reserved
-    list. All guesses.
+Answered items move to [Decided](#decided) at the bottom rather than being
+deleted, so the reasoning survives.
 
 ## Global discovery
 
@@ -87,3 +54,127 @@ challenging. Resolve the blocking ones before Phase 1 code.
 21. Account recovery. There is none, by design. Revisit only if user research
     says lost keys are killing retention — and if so, the fix is better key
     backup UX, not a recovery backdoor.
+
+## Decided
+
+Kept with their original numbering. Each entry says what was decided, what it
+costs, and where it landed in the docs.
+
+### 1. Safari Web Push inside web extensions → **no Safari extension; macOS desktop app instead**
+
+The Safari extension is dropped from the plan. Safari users get the **web app**
+(Safari Web Push works there, on macOS and iOS, for a site added to the Dock or
+Home Screen) and the **desktop app**.
+
+Consequence, stated plainly: this pulls the Tauri desktop app from Phase 2 into
+Phase 1. The server side of it — the SSE hub — was already Phase 1, so the
+incremental work is the shell, the tray, native notifications and packaging.
+Tauri builds all three desktop targets from one codebase, so Windows and Linux
+come along nearly free and there is no reason to ship macOS alone. What is *not*
+free: an Apple Developer Program membership, code signing and notarisation
+become Phase 1 dependencies with real lead time. Start that paperwork early.
+
+Net: Phase 1 grows. That is a deliberate trade for dropping the platform
+assumption the plan was least sure of. See [ROADMAP.md](ROADMAP.md) and
+[DELIVERY.md](DELIVERY.md).
+
+### 2. RFC 8291 ephemeral key reuse → **reuse the keypair, cache the shared secret**
+
+Decided: reuse the application-server ECDH keypair per subscription and cache
+the derived shared secret, so a digest push costs an AES-GCM seal rather than a
+fresh key agreement.
+
+Two honest caveats on that decision:
+
+* **It buys less than it looks like.** Payloadless-by-default means the common
+  case — `n == 1` — carries no body and therefore no crypto at all. Key reuse
+  only touches the `n > 1` digest path, which coalescing has already made the
+  minority of deliveries. If the RFC turns out to forbid it, the cost of falling
+  back is small, which is why this is safe to decide now.
+* **The salt is then the only per-message freshness.** With a fixed shared
+  secret per subscription, the 16-byte RFC 8188 salt is all that varies between
+  messages, so it must come fresh from `crypto/rand` for **every** message. A
+  repeated salt against a cached secret is key-and-nonce reuse under AES-GCM,
+  which is catastrophic, not merely untidy. Make that a test, not a comment.
+
+Still to do before the code lands: read RFC 8291 §3.1 and confirm reuse is
+permitted rather than assuming it. This decision sets the preferred direction;
+it does not license guessing at the standard.
+
+### 3. Pair-limit window → **loosened to 3 per 24 h, configurable, per handle kind**
+
+1 per person per 24 h was too tight: a five-person team could send you at most
+five pings a day, and a conference QR code wants a different rule entirely.
+
+New defaults, all runtime-configurable (`guard.pair.*`):
+
+| Handle kind | Default pair limit |
+| --- | --- |
+| `personal` | 3 per 24 h |
+| `social` | 3 per 24 h |
+| `group` | 3 per 24 h |
+| `stream` | 10 per 24 h |
+
+**This changes the data structure, which is the part worth noticing.** A Bloom
+filter answers "seen or not" and cannot count to three. The replacement is a
+cascade of `pair.max` filters per window: check slot 1, and if the pair is
+present check slot 2, and so on; insert into the first free slot; reject when
+all slots are full. Memory is `pair.max ×` the old allocation and lookup is
+still O(1) with a small constant. `pair.max = 1` degenerates exactly to the old
+design.
+
+The false-positive direction is unchanged and still the safe one: a false hit
+advances a slot, so a sender can only ever get *fewer* pings than their quota,
+never more. See [ABUSE.md](ABUSE.md).
+
+### 4. `expected_daily_pings` at launch → **1,000**
+
+At 1,000/day and ~2 bytes per entry the pair filter is measured in kilobytes,
+even across two rotating windows and three cascade slots. Because it is that
+cheap, the allocation carries a **floor of 1 MiB per slot per window** regardless
+of the configured value: it absorbs two orders of magnitude of growth before
+anyone has to think about the config again, and it makes a mistyped config
+harmless instead of silently useless. See [ARCHITECTURE.md](ARCHITECTURE.md).
+
+### 5. Domain → **`halp.to` stays a placeholder**
+
+No registration yet. It is not blocking for code, but it is blocking for
+anything public: badge URLs, share links, QR codes and the Web Push VAPID
+subject all bake the origin in, and changing it later invalidates every QR code
+already printed and every badge already in a README. Resolve before the first
+link is shared outside the team.
+
+### 6. Digest defaults → **confirmed: 60 s window, 12 per hour**
+
+Kept as the shipping defaults. Still a guess; revisit with real users rather
+than by argument. See [DELIVERY.md](DELIVERY.md).
+
+### 7. Sender feedback → **confirmed: a plain "Sent."**
+
+No delivery claim, no "they may receive this as part of a digest". The uniform
+`202` stands, which means an occasional honest sender is told "sent" for a ping
+that was deduped, blocked or dropped. That is the cost of invariant 7 and it is
+accepted deliberately.
+
+### 8. Public received counter → **not in Phase 1**
+
+The badge ships plain. No public count, no API field, no `?count=` variant.
+
+One implementation note that follows from invariant 1: keep incrementing the
+aggregate `accounts.recv_total` from day one anyway. There are no ping records,
+so a counter that is not maintained from the first ping can *never* be
+reconstructed. It costs one integer per account, it is already in the
+[PRIVACY.md](PRIVACY.md) inventory, and it stays invisible until the
+scoreboard question in item 8 gets a real answer.
+
+### 9. Minimum group size → **5, with a config knob added later**
+
+5 stays the default. The knob is **operator** configuration (`groups.min_size`),
+not a per-group admin setting: it exists to protect members from
+deanonymisation by inference, and the three-person group whose admin would want
+to turn it off is precisely the case it exists for. See [GROUPS.md](GROUPS.md).
+
+### 10. Alias policy → **confirmed**
+
+One alias per account, released after 12 months of inactivity, with a reserved
+list. See [IDENTITY.md](IDENTITY.md) and [DISCOVERY.md](DISCOVERY.md).

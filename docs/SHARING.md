@@ -15,9 +15,9 @@ visitor is provisioned an account in the background (proof-of-work, key kept in
 signup wall while still being rate-limitable per sender.
 
 The page must render without JavaScript for the preview crawlers, and must not
-leak anything about the owner: no display name, no counts unless the owner
-enabled the public counter, no "this handle does not exist" distinction from
-"this handle is paused" (uniform response, uniform timing).
+leak anything about the owner: no display name, no counts, no "this handle does
+not exist" distinction from "this handle is paused" (uniform response, uniform
+timing).
 
 Rich previews: OpenGraph and Twitter card tags so a pasted link looks right in
 Slack, Discord and social feeds.
@@ -57,9 +57,16 @@ images through Camo, so the badge **cannot** be a working button and cannot see
 the viewer — it is an image that links to the handle page. The click is where
 the ping happens.
 
-Badge variants: plain ("appreciate me"), or with a lifetime received count if
-the owner opts in. That count is a single aggregate integer on the account, not
-derived from any ping record. Cache headers must be long enough that a popular
+**The badge is plain — "appreciate me" and nothing else.** A public received
+count is deferred out of phase 1
+([decision 8](OPEN-QUESTIONS.md#decided)): the open question of whether it turns
+appreciation into a scoreboard has not been answered, and shipping it is the
+hard half to undo.
+
+The server keeps counting anyway. `accounts.recv_total` is a single aggregate
+integer, incremented from the first ping, exposed to nobody. That is not
+hedging: there are no ping records, so a counter that is not maintained from day
+one can never be reconstructed. Cache headers must be long enough that a popular
 README does not become a traffic source of its own.
 
 ## Live streaming

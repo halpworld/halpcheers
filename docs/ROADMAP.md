@@ -29,11 +29,25 @@ product.
 * Anomaly detection, adaptive PoW, report-abuse → top-sender mute.
 * Metrics and the no-identifier logging rules.
 * **Clients:** web app (send + receive + settings), Chrome and Firefox
-  extensions, landing page, QR.
+  extensions, **desktop app (Tauri)**, landing page, QR.
+* **Apple Developer Program, code signing and notarisation.** Lead time, not
+  engineering. Start it before the desktop app is ready to ship, not after.
 * **Load test before anything else ships.** Sustained 1,200 RPS and a 10k burst
   on the target VPS; measure ingress p99, Web Push CPU, SSE memory per
   connection. The capacity budget in [ARCHITECTURE.md](ARCHITECTURE.md) is
   arithmetic until this exists.
+
+**Why the desktop app moved up.** Dropping the Safari extension
+([decision 1](OPEN-QUESTIONS.md#decided)) left macOS users with the web app
+alone, so the desktop app became the answer instead. Tauri builds macOS,
+Windows and Linux from one codebase, so shipping only macOS would be the more
+expensive choice. The server side — the SSE hub — was already in this phase, so
+the incremental cost is the shell, the tray, native notifications and
+packaging. Phase 1 grows as a result; that is the accepted price of removing
+the platform assumption the plan was least confident in.
+
+There is no Safari extension in any phase. Safari users get the web app over
+Safari Web Push, and the desktop app.
 
 **Exit criteria:** a hostile person with a botnet and a published handle cannot
 make the recipient's day worse than one digest notification, and cannot make the
@@ -41,15 +55,15 @@ box fall over.
 
 ## Phase 2 — Reach
 
-* Desktop app (Tauri): tray, native notifications, autostart, per-handle view.
+* Desktop app polish: autostart, per-handle view, auto-update.
 * TUI (Bubble Tea): single static binary, SSE, `halp send <handle>`.
-* Safari support — resolve the extension-vs-web-push question first.
 * Aliases, and with them the global alias directory: claim registry,
   replication log, local replica, alias-in-send-path resolution. Aliases are
   meaningless if they are per-region, so the directory is not separable from
   the feature.
 * Groups: invites, roster, group-scoped handles, admin, minimum group size.
-* Badges (SVG + optional public counter), rich link previews.
+* Badges (SVG, plain — **no public counter in phase 1 or 2**, see
+  [decision 8](OPEN-QUESTIONS.md#decided)), rich link previews.
 
 ## Phase 3 — Amplifiers
 

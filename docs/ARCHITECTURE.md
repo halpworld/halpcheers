@@ -76,7 +76,7 @@ rejected before it costs anything:
 | Proof-of-work verify (1 × SHA-256) | ~2 µs | unpriced floods |
 | Sender token bucket (atomic, in-memory) | ~1 µs | one account sending too much |
 | Recipient inbound bucket | ~1 µs | one target being hammered |
-| Pair dedupe (rotating Bloom filter) | ~1 µs | repeat pings to the same person |
+| Pair dedupe (rotating Bloom cascade) | ~1 µs | over-quota pings to the same person |
 | Non-blocking channel send | ~100 ns | — |
 
 No disk I/O, no network, no locks held across I/O. The handle → account
@@ -127,9 +127,14 @@ work on 2–4 vCPU.
 > matters — i.e. `n > 1` — and even then it is `{"n":42}`. Coalescing therefore
 > cuts *both* notification spam and crypto cost, and most deliveries end up free.
 >
-> Whether an ECDH keypair may be reused across messages to the same subscription
-> (which would let us cache the shared secret) needs to be checked against
-> RFC 8291 before relying on it. Tracked in [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
+> **Decided:** reuse the application-server ECDH keypair per subscription and
+> cache the derived shared secret, so a digest push costs an AES-GCM seal rather
+> than a key agreement. Two conditions attach to that. Confirm against RFC 8291
+> §3.1 that reuse is permitted before the code lands — the fallback is cheap
+> because payloadless already covers the common case. And draw the 16-byte
+> RFC 8188 salt fresh from `crypto/rand` for **every** message: with a fixed
+> shared secret it is the only per-message freshness, and a repeat is AES-GCM
+> key-and-nonce reuse. Make that a test.
 
 **SSE connections are the memory risk.** Each open connection costs a goroutine
 stack plus read/write buffers — budget ~12–20 KB with tuned buffers. That puts a
@@ -148,12 +153,55 @@ are rare (registration, handle churn, settings). WAL mode, `synchronous=NORMAL`,
 one writer goroutine, `busy_timeout` set. A single indexed lookup from page cache
 beats a Redis round-trip, which is why there is no Redis.
 
-**Bloom filter.** Sized from a configured `expected_daily_pings` at ~2 bytes per
-entry for a ≤0.1% false-positive rate, double-buffered across two 24 h windows.
-At launch scale that is single-digit MB; at the 100M/day ceiling it is a few
-hundred MB of fixed allocation. Over capacity it degrades gracefully — the
+**Pair filters.** Sized from a configured `guard.expected_daily_pings` at
+~2 bytes per entry for a ≤0.1% false-positive rate, double-buffered across two
+24 h windows, and multiplied by `guard.pair.max` cascade slots (see
+[ABUSE.md](ABUSE.md) — counting to three needs one filter per slot).
+
+Launch value is `expected_daily_pings = 1000`, which is kilobytes. Because that
+is absurdly cheap, the allocation carries a **floor of 1 MiB per slot per
+window**: ≈6 MiB total, two orders of magnitude of headroom, and a mistyped
+config value becomes harmless instead of silently producing a filter that is
+full on day one. At the 100M/day ceiling the same arithmetic gives a few hundred
+MB of fixed allocation per slot. Over capacity it degrades gracefully — the
 false-positive rate rises and a few legitimate pings are silently deduped, which
 for this product is acceptable. Alert on the estimated fill ratio.
+
+## Configuration
+
+One TOML file, read at startup. No reflection-based config framework; a struct
+and `encoding/toml`-equivalent decoding by hand is enough.
+
+The split that matters: **anything sizing a fixed allocation is startup-only**
+(invariant 8 — you cannot resize a Bloom filter under load), while thresholds
+and windows can be reloaded on `SIGHUP`.
+
+| Key | Default | When | Notes |
+| --- | --- | --- | --- |
+| `queue.size` | 65536 | startup | bounded ping channel; full ⇒ drop + `202` |
+| `dispatch.max_age` | 30 s | reload | stale jobs are discarded, not retried |
+| `dispatch.workers` | 4 × vCPU | startup | |
+| `shutdown.drain_timeout` | 10 s | startup | |
+| `idle.demote_after` | 15 min | reload | SSE → long-poll for idle clients |
+| `guard.expected_daily_pings` | 1000 | startup | pair-filter sizing, floor 1 MiB/slot/window |
+| `guard.pair.window` | 24 h | startup | two of these rotate |
+| `guard.pair.max` | 3 (`stream`: 10) | startup | cascade slots; per handle kind |
+| `guard.sender.hour` / `.day` | 20 / 100 | reload | |
+| `guard.sketch.width` × `.depth` | sized from `expected_daily_pings` | startup | top-sender count-min sketch |
+| `pow.floor_ms` | 10 | reload | normal client cost; raised automatically under load |
+| `pow.signup_ms` | 1500 | reload | once per lifetime |
+| `pow.epoch` | 5 min | reload | challenge rotation |
+| `digest.window_s` | 60 | reload | per-account default, overridable per handle |
+| `digest.max_per_hour` | 12 | reload | ditto |
+| `groups.min_size` | 5 | reload | deanonymisation floor; operator-set, not admin-set |
+| `groups.max_members` | 500 | reload | |
+| `groups.max_per_account` | 20 | reload | |
+| `alias.release_months` | 12 | reload | squatting release |
+| `blocks.ttl_days` | 365 | reload | the one durable pair record |
+| `subscriptions.prune_after_days` | 180 | reload | |
+
+Every default above is a starting point, and several are recorded decisions
+rather than measurements — see [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
 
 ## Observability without records
 
@@ -188,10 +236,10 @@ halp/
 │   ├── go.mod
 │   └── Dockerfile
 ├── web/                     # TypeScript core: web app + shared UI/logic
-├── extension/               # MV3 (Chrome, Firefox) + Safari web-extension wrap
-├── desktop/                 # Tauri shell — tray, native notifications
+├── extension/               # MV3 (Chrome, Firefox). No Safari extension — see DELIVERY.md
+├── desktop/                 # Tauri shell (macOS first, Win/Linux same build) — tray, notifications
 ├── tui/                     # Go, Bubble Tea, single static binary
-├── mobile/                  # placeholder, phase 2
+├── mobile/                  # placeholder, phase 4
 ├── docs/
 ├── docker-compose.yml
 └── AGENTS.md

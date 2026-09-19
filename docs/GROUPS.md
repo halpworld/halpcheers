@@ -80,9 +80,10 @@ the data inventory in [PRIVACY.md](PRIVACY.md).
 A group is a list of people who can be reached, so it is an amplifier and needs
 its own limits on top of the global ones in [ABUSE.md](ABUSE.md):
 
-* Member → member: 1 ping per 24 h (the global pair limit, scoped to the group
-  handle) plus a per-sender cap on *distinct* group members pinged per day, so
-  nobody can spray the whole roster daily.
+* Member → member: the global pair limit, scoped to the group handle
+  (`guard.pair.max`, default 3 per 24 h — see [ABUSE.md](ABUSE.md)), plus a
+  per-sender cap on *distinct* group members pinged per day, so nobody can spray
+  the whole roster daily.
 * Group-wide inbound cap, set by the owner.
 * Max members per group (default 500) and max groups per account (default 20),
   both configurable — these are the anti-amplification ceilings, not product
@@ -105,5 +106,10 @@ everyone almost exactly who sent it.
 **Small-group deanonymisation is a real risk even without leaderboards.** In a
 three-person group, a recipient can often guess the sender. Mitigations: never
 expose per-member received counts, never expose timing beyond the digest window,
-and set a minimum group size (default 5) below which group-scoped pings are
-disabled with an honest explanation in the UI.
+and set a minimum group size below which group-scoped pings are disabled with an
+honest explanation in the UI.
+
+That floor is `groups.min_size`, default **5**. It is deliberately **operator**
+configuration and not a per-group admin setting: it exists to protect members
+from deanonymisation by inference, and the three-person group whose admin would
+want to switch it off is exactly the case it is there for.

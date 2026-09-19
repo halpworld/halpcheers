@@ -28,7 +28,7 @@ Everything the service stores, and why.
 | Delivery settings | SQLite | life of account | contract |
 | Group membership + display name | SQLite | until leave/removal | contract |
 | Blocks `(sender, handle, created_day)` | SQLite | 12 months | legitimate interest — safety |
-| Lifetime received counter | SQLite | life of account | contract |
+| Lifetime received counter | SQLite | life of account | contract — aggregate integer, not exposed publicly in phase 1 |
 | Rate-limit buckets, Bloom bits, sketches | memory only | minutes to 48 h | legitimate interest — security |
 | Aggregate metrics (no identifiers) | memory / Prometheus | operational | legitimate interest |
 

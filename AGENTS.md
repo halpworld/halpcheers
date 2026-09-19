@@ -39,7 +39,7 @@ on the hot path needs a justification in the PR description.
 
 **4. Token lifecycle hygiene.**
 Prune subscriptions on authoritative rejection only (Web Push `404`/`410`;
-phase 2 APNs `Unregistered`, FCM `registration-token-not-registered`). Delete by
+phase 4 APNs `Unregistered`, FCM `registration-token-not-registered`). Delete by
 exact endpoint **and** only if the row predates the failed send, or a device
 that re-registered mid-flight gets silently unsubscribed. Never prune on
 transient errors.

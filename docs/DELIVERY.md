@@ -6,17 +6,26 @@
 | --- | --- | --- |
 | Web app | Web Push (VAPID) + SSE when the tab is open | SW shows the notification when backgrounded |
 | Chrome / Firefox extension | Web Push in the MV3 service worker | shares the web codebase |
-| Safari | Web Push | Safari's support for the Push API *inside web extensions* is the weakest link; verify before committing. Fallback is Safari Web Push for the web app plus the desktop app. |
-| Desktop (Tauri, Win/macOS/Linux) | SSE + native OS notification and tray | reconnect with jittered backoff |
+| Safari | Web Push, web app only | **No Safari extension** — the Push API inside Safari web extensions was the weakest assumption in the plan, so it was dropped rather than verified. Safari users get the web app (Safari Web Push, macOS and iOS, best when added to the Dock or Home Screen) and the desktop app. |
+| Desktop (Tauri, macOS/Win/Linux) | SSE + native OS notification and tray | phase 1; macOS is the priority build, the other two fall out of the same codebase. Reconnect with jittered backoff |
 | TUI (Go, Bubble Tea) | SSE | prints a line, optional terminal bell |
 | OBS overlay | SSE, read-only | see [SHARING.md](SHARING.md) |
-| Mobile | APNs / FCM | phase 2, not built |
+| Mobile | APNs / FCM | phase 4, not built |
 
 **Web Push is payloadless by default.** The service worker already knows the only
 sentence it will ever display, so a body is pure cost: RFC 8291 encryption is a
 per-subscription ECDH and cannot be amortised across recipients. We attach a tiny
 encrypted body (`{"n":42}`) only when a digest collapsed more than one ping and
 the count is worth showing. Most deliveries therefore involve no crypto at all.
+
+The application-server ECDH keypair is **reused per subscription** and the
+derived shared secret cached, so a digest push costs an AES-GCM seal rather than
+a fresh key agreement. That optimisation only touches the `n > 1` path, and it
+comes with one hard requirement: with a fixed shared secret, the 16-byte
+RFC 8188 salt is the only per-message freshness, so it must be drawn fresh from
+`crypto/rand` for every message. A repeated salt there is AES-GCM key-and-nonce
+reuse. Cover it with a test. See
+[OPEN-QUESTIONS.md](OPEN-QUESTIONS.md#2-rfc-8291-ephemeral-key-reuse--reuse-the-keypair-cache-the-shared-secret).
 
 **SSE, not WebSockets.** One-directional is all we need, `EventSource` reconnects
 by itself, it survives proxies, and it costs less per connection. Sends go over
@@ -62,7 +71,9 @@ is not a message record.
 ## Delivery policy (the "someone famous shows up" case)
 
 Per account, overridable per handle. Six small integers, stored in SQLite,
-cached in memory:
+cached in memory. The two defaults that matter, 60 s and 12/hour, are
+[decided](OPEN-QUESTIONS.md#6-digest-defaults--confirmed-60-s-window-12-per-hour)
+and still a guess worth validating with real users:
 
 | Setting | Default | Range |
 | --- | --- | --- |
@@ -98,7 +109,7 @@ the literal setting.
 
 ## Token and subscription hygiene
 
-Prune on authoritative rejection: Web Push `404` / `410 Gone`, and (phase 2)
+Prune on authoritative rejection: Web Push `404` / `410 Gone`, and (phase 4, if mobile happens)
 APNs `410 Unregistered` / FCM `registration-token-not-registered`.
 
 **The race that matters:** a device can re-register between our send and the

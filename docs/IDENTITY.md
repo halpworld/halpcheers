@@ -84,9 +84,14 @@ try `@john`. Therefore:
   much as sending — proof-of-work, buckets and pair filter included. A
   standalone lookup would be a free enumeration oracle.
 * Reserved-name list (support, admin, halp, help, abuse, security, …) and a
-  squatting rule: an alias on an account with no activity for 12 months is
-  released.
-* One alias per account to start. Revisit if there is demand.
+  squatting rule (`alias.release_months`, default 12): an alias on an account
+  with no activity for 12 months is released.
+* One alias per account. Revisit if there is demand.
+
+The three rules above are settled
+([decision 10](OPEN-QUESTIONS.md#decided)); how the global namespace stays
+unique across regions is not — see [DISCOVERY.md](DISCOVERY.md) and open
+questions 11 and 12.
 
 ## Regions
 
