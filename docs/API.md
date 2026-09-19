@@ -34,19 +34,30 @@ GET    /v1/handles               → [ { handle, label, kind, paused, policy, co
 POST   /v1/handles               { label, kind } → { handle }
 PATCH  /v1/handles/{handle}      { label?, paused?, policy? }
 DELETE /v1/handles/{handle}      burn — permanent, never reissued
-PUT    /v1/alias                 { alias, handle }
+PUT    /v1/alias                 { alias, handle }   global claim, see DISCOVERY.md
 DELETE /v1/alias
-GET    /v1/resolve/{alias}       → { handle }   heavily rate-limited, uniform errors
 ```
+
+There is deliberately **no** `GET /v1/resolve/{alias}`. Resolution happens
+inside the send path so that probing the global alias namespace costs the same
+as sending. See [DISCOVERY.md](DISCOVERY.md).
 
 ### Sending
 
 ```
-POST   /v1/ping/{handle}         → 202 Accepted, empty body, < 3 ms
+POST   /v1/ping/{target}         → 202 Accepted, empty body, < 3 ms
 ```
 
-The only hot endpoint. No body. No idempotency key — the pair filter already
-collapses repeats.
+`{target}` is a handle (`a3k9w7m2qx5t`) or an alias (`@kenth`). The only hot
+endpoint. No body. No idempotency key — the pair filter already collapses
+repeats.
+
+Routing is lookup-free for handles: the first character is the home region, so
+a non-local prefix is validated, enqueued and forwarded to the owning region
+over the inter-region link, still returning `202` locally. An alias resolves
+against the local replica of the global directory first, then follows the same
+path. Unknown target, paused handle, rate-limited, blocked and delivered are
+all indistinguishable to the sender.
 
 ### Receiving
 
@@ -83,6 +94,17 @@ GET    /overlay/{token}          SSE overlay for OBS (phase 3, revocable token)
 GET    /healthz  /readyz  /metrics
 ```
 
+### Inter-region (mTLS, peer-only, never public)
+
+```
+POST   /peer/v1/forward          { handle, n }   already validated upstream
+GET    /peer/v1/aliases?since=   → append-only claim log for replication
+POST   /peer/v1/alias-claim      registry only: serialise a global claim
+GET    /peer/v1/groups/{id}/roster              cross-region roster read
+```
+
+`forward` carries a handle and a count. No sender, no IP, no content.
+
 ## SQLite schema (draft)
 
 WAL mode, `synchronous=NORMAL`, `foreign_keys=ON`, single writer goroutine,
@@ -112,12 +134,26 @@ CREATE TABLE handles (
 );
 CREATE INDEX handles_by_account ON handles(account_id);
 
+-- Aliases owned by THIS region's accounts. Source of truth for our own rows.
 CREATE TABLE aliases (
   alias       TEXT PRIMARY KEY,
   account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   handle      TEXT NOT NULL REFERENCES handles(handle) ON DELETE CASCADE,
+  seq         INTEGER NOT NULL,       -- position in this region's claim log
   created_day INTEGER NOT NULL
 );
+
+-- The global directory: every region's aliases, replicated read-only.
+-- The ONLY globally replicated table. Public by nature, opt-in. See DISCOVERY.md.
+CREATE TABLE alias_directory (
+  alias        TEXT PRIMARY KEY,
+  handle       TEXT NOT NULL,          -- NOT a FK: may belong to another region
+  owner_region TEXT NOT NULL,
+  seq          INTEGER NOT NULL,
+  tombstone    INTEGER NOT NULL DEFAULT 0,
+  created_day  INTEGER NOT NULL
+);
+CREATE INDEX alias_dir_sync ON alias_directory(owner_region, seq);
 
 CREATE TABLE subscriptions (
   id          INTEGER PRIMARY KEY,
@@ -149,15 +185,29 @@ CREATE TABLE groups (
   created_day      INTEGER NOT NULL
 );
 
+-- Roster, at the GROUP's home region. account_id is NULL for foreign members:
+-- their account lives in their own region and we only hold what the roster needs.
 CREATE TABLE group_members (
-  group_id     INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  group_id      INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  member_region TEXT NOT NULL,
+  account_id    INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+  display_name  TEXT NOT NULL,
+  note          TEXT,
+  handle        TEXT NOT NULL,         -- group-scoped, minted at the member's region
+  role          TEXT NOT NULL DEFAULT 'member',
+  joined_day    INTEGER NOT NULL,
+  PRIMARY KEY (group_id, handle)
+);
+
+-- The member's own side, at the MEMBER's home region. Lets account deletion and
+-- data export work locally without reaching into another region.
+CREATE TABLE group_memberships (
   account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  display_name TEXT NOT NULL,
-  note         TEXT,
+  group_id     INTEGER NOT NULL,
+  group_region TEXT NOT NULL,
   handle       TEXT NOT NULL REFERENCES handles(handle) ON DELETE CASCADE,
-  role         TEXT NOT NULL DEFAULT 'member',
   joined_day   INTEGER NOT NULL,
-  PRIMARY KEY (group_id, account_id)
+  PRIMARY KEY (account_id, group_id, group_region)
 );
 
 -- The one deliberate exception to "no sender/recipient pairs on disk".

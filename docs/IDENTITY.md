@@ -76,9 +76,13 @@ try `@john`. Therefore:
   fresh handle and every previously-harvested reference dies with the old one.
 * Aliases get their own, stricter inbound rate limit and their own pause switch,
   independent of the handle behind them.
-* Resolution (`GET /v1/resolve/{alias}`) is heavily rate-limited per sender and
-  per IP, and returns the same timing and response shape for "no such alias" and
-  "alias paused", so it cannot be used to enumerate who exists.
+* **The alias namespace is global**, not per-region — `@kenth` means one person
+  everywhere. It is the only globally replicated table in the system. See
+  [DISCOVERY.md](DISCOVERY.md).
+* **There is no resolve endpoint.** `POST /v1/ping/{target}` takes a handle or
+  an alias and resolves internally, so probing the namespace costs exactly as
+  much as sending — proof-of-work, buckets and pair filter included. A
+  standalone lookup would be a free enumeration oracle.
 * Reserved-name list (support, admin, halp, help, abuse, security, …) and a
   squatting rule: an alias on an account with no activity for 12 months is
   released.
@@ -87,9 +91,14 @@ try `@john`. Therefore:
 ## Regions
 
 We will host in the EU and may add regions if one gets popular. The design is
-**regional independence, not replication**: each region is a complete standalone
-deployment with its own SQLite file. No user data crosses a border at rest,
-which keeps the transfer analysis in [PRIVACY.md](PRIVACY.md) short.
+**regional independence for account data, with one global namespace on top**:
+each region is a standalone deployment with its own SQLite file, and the only
+thing replicated everywhere is the opt-in `alias → handle` directory. Account
+keys, subscriptions, settings, blocks and counters never leave their home
+region, which keeps the transfer analysis in [PRIVACY.md](PRIVACY.md) short.
+
+Nobody should ever have to know or pick a region to reach someone.
+[DISCOVERY.md](DISCOVERY.md) is the full account of how that holds.
 
 The first character of a handle is its home region (`e` = eu-1, `u` = us-1,
 `a` = ap-1, …). Any region can therefore route a ping without shared state or a
@@ -100,7 +109,15 @@ content — so cross-region traffic carries no personal data about the sender.
 
 An account lives in exactly one region, chosen at signup (default: nearest, user
 overridable). Region migration is out of scope for v1; the honest answer is
-"create a new account and repoint your alias".
+"create a new account and repoint your alias" — which works precisely because
+the alias namespace is global and the repoint is visible everywhere.
+
+Two caveats worth stating rather than burying. A handle's prefix reveals its
+owner's region to anyone holding the handle; that is the price of lookup-free
+routing and it is a coarse enough signal to accept. And a group hosted in
+another region stores its foreign members' display names and group handles
+there, so "your data never leaves your region" is not an accurate thing to
+print — "your account lives in your region" is.
 
 ## Sender identity
 

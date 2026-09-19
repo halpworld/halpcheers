@@ -22,6 +22,23 @@ enabled the public counter, no "this handle does not exist" distinction from
 Rich previews: OpenGraph and Twitter card tags so a pasted link looks right in
 Slack, Discord and social feeds.
 
+### Alias links
+
+```
+https://halp.to/@kenth
+```
+
+Same page, same one-tap send, but memorable enough to say out loud. Aliases are
+global — one namespace across every region — so an alias link works from
+anywhere without the sender knowing or caring where the recipient's account
+lives. See [DISCOVERY.md](DISCOVERY.md).
+
+The page must render identically for an alias that does not exist, is paused,
+or belongs to someone who has blocked the viewer. There is no resolve endpoint
+and no validity check: a typo looks exactly like a success. That is deliberate,
+because a guessable global namespace with a free existence oracle would be
+scraped within a week.
+
 ## QR code
 
 Generated client-side from the handle URL — the server never needs to be

@@ -54,6 +54,11 @@ browser extensions, desktop and a TUI first changes three things:
 
   SQLite (WAL) ──── accounts, handles, aliases, subscriptions, settings,
                     groups, blocks, aggregate counters.  Never pings.
+                    + alias_directory: the one globally replicated table.
+
+  Peer link  ─────── mTLS HTTP/2 to sibling regions: forward pings by handle
+                     prefix, pull the alias claim log, read group rosters.
+                     Off the hot path except the forward itself.
 ```
 
 Everything on one box. One Go binary, one SQLite file, no Redis, no message
@@ -178,7 +183,8 @@ halp/
 │   │   ├── push/            # RFC 8291 Web Push (stdlib crypto, no deps)
 │   │   ├── stream/          # SSE hub
 │   │   ├── store/           # SQLite, hand-written SQL, no ORM
-│   │   └── region/          # handle prefix routing + peer forwarding
+│   │   ├── region/          # handle prefix routing + peer forwarding
+│   │   └── directory/       # global alias replica + claim log sync
 │   ├── go.mod
 │   └── Dockerfile
 ├── web/                     # TypeScript core: web app + shared UI/logic

@@ -44,7 +44,10 @@ box fall over.
 * Desktop app (Tauri): tray, native notifications, autostart, per-handle view.
 * TUI (Bubble Tea): single static binary, SSE, `halp send <handle>`.
 * Safari support — resolve the extension-vs-web-push question first.
-* Aliases.
+* Aliases, and with them the global alias directory: claim registry,
+  replication log, local replica, alias-in-send-path resolution. Aliases are
+  meaningless if they are per-region, so the directory is not separable from
+  the feature.
 * Groups: invites, roster, group-scoped handles, admin, minimum group size.
 * Badges (SVG + optional public counter), rich link previews.
 
@@ -52,7 +55,10 @@ box fall over.
 
 * OBS overlay with revocable tokens; streamer handle presets.
 * Twitch/YouTube chat bot as a thin API client.
-* Second region, if warranted, exercising the prefix routing path.
+* Second region, if warranted — exercises prefix routing, alias replication,
+  cross-region group rosters and, most importantly, cross-region erasure
+  reconciliation. Write that test before the second region exists, using two
+  local instances.
 * Public transparency report.
 
 ## Phase 4 — Mobile, if feasible

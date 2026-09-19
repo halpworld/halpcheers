@@ -39,25 +39,51 @@ challenging. Resolve the blocking ones before Phase 1 code.
 10. **Alias policy.** One per account, 12-month squatting release, reserved
     list. All guesses.
 
+## Global discovery
+
+*Added after the "how do I find my friend in Hong Kong" question. See
+[DISCOVERY.md](DISCOVERY.md).*
+
+11. **Alias uniqueness: central registry or hashed namespace sharding?** The
+    registry is simpler and its outage mode is benign (claims pause, everything
+    else works). Sharding removes the central component at the cost of more
+    moving parts. Decide before aliases ship, not after — migrating a live
+    namespace is unpleasant.
+12. **Where does the registry run**, if we pick it? A separate tiny service, or
+    a designated primary region? The latter is less to deploy and makes one
+    region special, which is the thing the rest of the design avoids.
+13. **Rate-limit budget splitting across regions.** Buckets are per-region and
+    in memory, so a scraper spread over N regions gets N× the budget on the
+    alias path. Setting per-region budgets to `global / N` is the cheap answer
+    and it penalises legitimate users in busy regions. Is that acceptable, or
+    do we need shared counters (and the coordination cost that implies)?
+14. **Contacts sync.** Local-first with a manual encrypted export is the phase-1
+    answer. With three devices it may not be good enough. Any sync must be
+    end-to-end encrypted under a key derived from the account key — the server
+    must never hold a readable social graph.
+15. **Minimum group size across regions.** The size-5 deanonymisation floor is
+    per group, but a cross-region group could in principle be counted
+    differently. Confirm it is just "members, wherever they are".
+
 ## Operational
 
-11. **Funding.** There is no revenue model here and the non-goals forbid the
+16. **Funding.** There is no revenue model here and the non-goals forbid the
     usual ones. A $10–20 VPS is cheap, but decide now whether this is a hobby
     project, donation-funded, or something else — it changes how much the
     100M/day ceiling is worth engineering for.
-12. **Region set and hosting provider.** EU-first is decided; which provider,
+17. **Region set and hosting provider.** EU-first is decided; which provider,
     and what the backup/restore story is for the SQLite file (it holds the only
     copy of every account's handles).
-13. **Legal review.** Push-service transfer analysis, age policy, and the ToS.
+18. **Legal review.** Push-service transfer analysis, age policy, and the ToS.
     Named in [PRIVACY.md](PRIVACY.md), not yet done.
-14. **Abuse escalation path.** Everything is automatic by design. Who looks at
+19. **Abuse escalation path.** Everything is automatic by design. Who looks at
     the dashboard when the automatic response is not enough, and what manual
     levers exist?
 
 ## Deferred
 
-15. Region migration for an existing account. Out of scope for v1; current
+20. Region migration for an existing account. Out of scope for v1; current
     answer is "make a new account and repoint your alias".
-16. Account recovery. There is none, by design. Revisit only if user research
+21. Account recovery. There is none, by design. Revisit only if user research
     says lost keys are killing retention — and if so, the fix is better key
     backup UX, not a recovery backdoor.

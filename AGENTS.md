@@ -75,7 +75,20 @@ pattern, not the path.
 * The account key is only ever stored as an Argon2id hash. It must never appear
   in a URL, QR code, log, metric or share link.
 * Account deletion is immediate, synchronous and complete. Handles are never
-  reissued.
+  reissued. It must also reach the two cross-region exceptions below: an alias
+  tombstone into the replication log, and roster rows dropped at each group's
+  region. Erasure that stops at the regional boundary is a compliance bug.
+* **Account data never leaves its home region.** The `alias_directory` table is
+  the only globally replicated data in the system, and it holds an opt-in,
+  public-by-nature `alias → handle` mapping and nothing else. A foreign-region
+  group roster row is the only other cross-border storage, it is disclosed at
+  the join screen, and it carries only what a roster needs. Adding a third
+  exception needs the same treatment as invariant 1's — documented in
+  `docs/PRIVACY.md`, disclosed in the UI, and reachable by erasure.
+* **No existence oracles.** There is no alias resolve endpoint; resolution
+  happens inside `POST /v1/ping/{target}` so probing costs the same as sending.
+  Do not add a lookup, validity check, autocomplete or "is this handle real?"
+  helper, however convenient it would be for the client.
 
 ## Losses are acceptable; lying about them is not
 

@@ -52,6 +52,29 @@ there is no presence, no last-seen, no activity feed.
 Owner departure with no transfer promotes the longest-tenured admin, else the
 group is archived after 30 days.
 
+## Groups span regions
+
+A group lives in one region; its members do not have to. Your dev team can be
+half in eu-1 and half in ap-1 and nobody has to know that.
+
+* The group record and roster live in the **group's** home region.
+* Joining mints your group-scoped handle at **your own** region, so it carries
+  your prefix and self-routes like any other handle. Pinging a teammate needs
+  no directory and no cross-region lookup.
+* Your account, subscriptions and settings never leave your region. The group's
+  region holds only what a roster needs: display name, note, and the
+  group-scoped handle.
+* Roster reads are a small, cacheable cross-region read.
+* Leaving burns the handle at your region and drops the roster row at theirs;
+  both sides are reconciled so a partitioned region cannot resurrect a
+  departed member.
+
+**Say this at the join screen:** *"This group is hosted in ap-1. Your display
+name and group handle will be stored there."* It is user-initiated and minimal,
+but it is real, and it is the reason the marketing line is "your account lives
+in your region" rather than "your data never leaves your region". It belongs in
+the data inventory in [PRIVACY.md](PRIVACY.md).
+
 ## Abuse considerations
 
 A group is a list of people who can be reached, so it is an amplifier and needs
@@ -65,6 +88,9 @@ its own limits on top of the global ones in [ABUSE.md](ABUSE.md):
   both configurable — these are the anti-amplification ceilings, not product
   limits, and should be raised deliberately.
 * Removing a member is instant and silent to them.
+* Cross-region groups do not get a bigger budget. Rate limits apply at the
+  recipient's own region, which sees all traffic to its own handles no matter
+  where it entered the system.
 * Report-abuse inside a group additionally offers "mute this group", which is
   just pausing the group-scoped handle.
 

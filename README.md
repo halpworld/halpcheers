@@ -22,6 +22,7 @@ Design phase. No code yet. The full plan lives in [`docs/`](docs/).
 | [docs/IDENTITY.md](docs/IDENTITY.md) | Account keys, handles, aliases, regions |
 | [docs/ABUSE.md](docs/ABUSE.md) | The defence stack — the most important document here |
 | [docs/DELIVERY.md](docs/DELIVERY.md) | Transports, coalescing, digest policy |
+| [docs/DISCOVERY.md](docs/DISCOVERY.md) | Finding people globally across regions |
 | [docs/GROUPS.md](docs/GROUPS.md) | Teams and group-scoped handles |
 | [docs/SHARING.md](docs/SHARING.md) | Links, QR, badges, live-stream overlays |
 | [docs/PRIVACY.md](docs/PRIVACY.md) | GDPR posture, data inventory, multi-region |

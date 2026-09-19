@@ -21,7 +21,9 @@ Everything the service stores, and why.
 | Account key hash (Argon2id) | SQLite | life of account | contract |
 | Account region, `created_day`, `last_seen_day` | SQLite | life of account | contract |
 | Handles (+ label, paused flag, policy) | SQLite | until burned | contract |
-| Alias | SQLite | until released | contract |
+| Alias (own region) | SQLite | until released | contract |
+| `alias → handle` in every region's directory replica | SQLite, **all regions** | until released | contract — opt-in, public by nature |
+| Group roster row for a foreign-region group (display name, note, group handle) | SQLite at the **group's** region | until leave/removal | contract — user-initiated |
 | Push subscriptions (endpoint URL, p256dh, auth) | SQLite | until pruned / 180 d idle | contract |
 | Delivery settings | SQLite | life of account | contract |
 | Group membership + display name | SQLite | until leave/removal | contract |
@@ -38,6 +40,29 @@ access-log path parameters, precise account timestamps.
 rather than second-precision. Second-precision timestamps across a handful of
 tables are a surprisingly good correlation fingerprint; days are enough for
 retention and hygiene and much weaker as an identifier.
+
+## What crosses a border, and why
+
+Regional independence has exactly two documented exceptions. Both are
+user-initiated and both are narrow; everything else — key hashes,
+subscriptions, settings, blocks, counters — stays in the home region.
+
+1. **The alias directory replicates globally.** An alias exists to be found by
+   strangers, so replicating `alias → handle` discloses nothing the user has
+   not deliberately published. It is opt-in, and the opt-in is the consent
+   point: say at claim time that the alias becomes visible in every region.
+   Claiming is also the only write that touches a central registry; nothing
+   else does.
+2. **Joining a group hosted in another region** stores your display name, note
+   and group-scoped handle there. Disclosed at the join screen, deleted on
+   leave or removal, and mirrored by a local `group_memberships` row so that
+   account deletion and data export still work entirely from your own region.
+
+Cross-region *pings* carry a handle and a count. No sender, no IP, no content.
+There is no personal data about the sender in a forwarded ping at all.
+
+Consequence for the copy: **"your account lives in your region"** is accurate;
+"your data never leaves your region" is not, and must not be printed.
 
 ## Push subscription endpoints are the sensitive bit
 
@@ -72,6 +97,14 @@ unusual:
   subscriptions, settings, group memberships and blocks, immediately and
   synchronously. Nothing to anonymise because there is nothing pseudonymous
   left behind. Handles are never reissued.
+* **Erasure reaches the two cross-border exceptions too**, and must be
+  verifiable: deleting an account writes an alias tombstone into the
+  replication log so every region drops the directory row, and drops the
+  roster rows at each group's region using the local `group_memberships`
+  mirror. Both are fire-and-forget to peers but retried until acknowledged; a
+  region that was partitioned during a deletion must reconcile on reconnect.
+  Erasure that silently stops at the regional boundary is the most likely
+  compliance failure in this design — build the reconciliation test first.
 * **Rectification** — everything is user-editable in the client.
 * **We cannot service a request from someone who has lost their key**, because
   we have no way to identify them and no way to authenticate the claim. This is
