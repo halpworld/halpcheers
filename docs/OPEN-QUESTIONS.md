@@ -438,6 +438,20 @@ Decided: the default global floor `pow.floor_ms = 10` corresponds to $d=14$ lead
 
 Tolerance for clock skew on challenge epochs is set to $\pm 1$ adjacent epoch ($\pm 5$ minutes around the active epoch). Tokens for epochs older than `cur - 1` or future epochs beyond `cur + 1` are authoritatively rejected as expired. This accounts for reasonable client device clock drift without opening a precomputation window wider than 10 minutes. Challenges are derived deterministically via HMAC-SHA256 from a server-seeded rotating secret. Hot-path verification uses a stack-allocated buffer and `sha256.Sum256` achieving zero heap allocations and ~130 ns execution time, well inside the 2 µs request path budget.
 
+### 30. Handle encoding and resolver LRU cache → **Crockford base32 with 'e' prefix, 60-bit entropy, bounded in-process LRU**
+
+Decided: handles are minted as 13 characters: a fixed region prefix (`e` for `eu-1`)
+followed by 12 characters of lowercase Crockford base32 (`0123456789abcdefghjkmnpqrstvwxyz`,
+excluding `i`, `l`, `o`, `u`). Each character encodes 5 bits, providing 60 bits of
+entropy drawn from `crypto/rand`.
+
+Handle and alias resolution on the ingress path is backed by an in-process thread-safe
+LRU cache (`*region.Resolver`) sized from `config.ResolverCacheSize` (default 100,000 items,
+~16 MB memory footprint). Cache misses fall back to SQLite read queries (`handles` and `aliases`
+tables). When a handle is updated or burned (moved into `burns` table), the resolver LRU
+entry is invalidated immediately. In accordance with invariant 8, the cache uses fixed
+memory bounds and cannot be bloated by arbitrary attacker inputs.
+
 ### 31. Pair-limit cascaded Bloom filters and count-min sketch dimensions → **cascaded slots with 1 MiB minimum floor, 4x2048 count-min sketch**
 
 Decided: the pair deduplication limit (`server/internal/guard/`) is enforced using a cascade of Bloom filters per 24-hour window, rotated across today and yesterday. Each slot is allocated with a hard 1 MiB floor (`guard.pair.slot_bytes = 1048576`), yielding a false positive probability $< 10^{-6}$ for typical daily ping volumes.
