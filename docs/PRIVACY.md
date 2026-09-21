@@ -1,9 +1,12 @@
-# Privacy, data protection and regions
+# Privacy and data protection
 
 Engineering posture, not legal advice. Have counsel review the policy text and
 the DPA chain before launch — particularly the push-service transfers below.
 
-Hosting is EU-first, with the possibility of additional regions later.
+**Hosting is one region, `eu-1`, in the EU**
+([decision 22](OPEN-QUESTIONS.md#decided)). Additional regions are possible
+later and would change this document materially; what is written below
+describes what we actually run.
 
 ## Why this is easy for us
 
@@ -21,13 +24,11 @@ Everything the service stores, and why.
 | Account key hash (Argon2id) | SQLite | life of account | contract |
 | Account region, `created_day`, `last_seen_day` | SQLite | life of account | contract |
 | Handles (+ label, paused flag, policy) | SQLite | until burned | contract |
-| Alias (own region) | SQLite | until released | contract |
-| `alias → handle` in every region's directory replica | SQLite, **all regions** | until released | contract — opt-in, public by nature |
-| Group roster row for a foreign-region group (display name, note, group handle) | SQLite at the **group's** region | until leave/removal | contract — user-initiated |
+| Alias | SQLite | until released | contract — opt-in, public by nature |
 | Push subscriptions (endpoint URL, p256dh, auth) | SQLite | until pruned / 180 d idle | contract |
 | Delivery settings | SQLite | life of account | contract |
 | Group membership + display name | SQLite | until leave/removal | contract |
-| Contacts blob (opaque ciphertext, size class, `updated_day`) | SQLite, **home region only** | life of account | contract — client-encrypted, unreadable to us |
+| Contacts blob (opaque ciphertext, size class, `updated_day`) | SQLite | life of account | contract — client-encrypted, unreadable to us |
 | Blocks `(sender, handle, created_day)` | SQLite | 12 months | legitimate interest — safety |
 | Lifetime received counter | SQLite | life of account | contract — aggregate integer, not exposed publicly in phase 1 |
 | Rate-limit buckets, Bloom bits, sketches | memory only | minutes to 48 h | legitimate interest — security |
@@ -43,9 +44,7 @@ device; the client derives `auth_secret` for login and `contacts_key` for
 encryption by HKDF domain separation, and only the first is ever sent. The blob
 is AES-256-GCM under `contacts_key` and padded to a 4 KiB boundary before
 sealing. What we do learn: that an account has one, which size class it falls
-in, and the day it last changed. Not who is in it, and not how many. It is
-stored in the home region only and is deliberately not replicated, so it does
-not become a third cross-border exception.
+in, and the day it last changed. Not who is in it, and not how many.
 
 **Timestamps are day-granular** (`created_day`, `last_seen_day` as integer days)
 rather than second-precision. Second-precision timestamps across a handful of
@@ -54,32 +53,24 @@ retention and hygiene and much weaker as an identifier.
 
 ## What crosses a border, and why
 
-Regional independence has exactly two documented exceptions. Both are
-user-initiated and both are narrow; everything else — key hashes,
-subscriptions, settings, blocks, counters — stays in the home region.
+**Nothing we store does.** There is one region, in the EU, and no replication,
+no peer link and no registry ([decision 22](OPEN-QUESTIONS.md#decided)). Every
+row in the inventory above lives in one SQLite file in the EU, which removes
+the two documented exceptions the multi-region draft carried — a globally
+replicated alias directory and foreign-region group roster rows — along with
+the cross-border erasure reconciliation they required.
 
-1. **The alias directory replicates globally.** An alias exists to be found by
-   strangers, so replicating `alias → handle` discloses nothing the user has
-   not deliberately published. It is opt-in, and the opt-in is the consent
-   point: say at claim time that the alias becomes visible in every region.
-   Claiming is also the only write that touches the central registry; nothing
-   else does.
+That makes one sentence printable that was not before: **your account data
+stays in the EU.** It is worth using, and it is worth guarding — the moment a
+second region exists it stops being true and the whole analysis comes back.
+[DISCOVERY.md](DISCOVERY.md) keeps that design parked so the cost is visible
+before anyone signs up for it.
 
-   **`halp-registry` is a processor in the chain** and belongs in the record of
-   processing activities. It handles `(alias, handle, owner_region)` — opt-in,
-   public-by-nature data — and never sees an account, a session, an end-user IP
-   or a ping. It is reachable only by peer regions over mTLS, with no public
-   DNS name and no unauthenticated read path.
-2. **Joining a group hosted in another region** stores your display name, note
-   and group-scoped handle there. Disclosed at the join screen, deleted on
-   leave or removal, and mirrored by a local `group_memberships` row so that
-   account deletion and data export still work entirely from your own region.
-
-Cross-region *pings* carry a handle and a count. No sender, no IP, no content.
-There is no personal data about the sender in a forwarded ping at all.
-
-Consequence for the copy: **"your account lives in your region"** is accurate;
-"your data never leaves your region" is not, and must not be printed.
+**The honest footnote, which must travel with the sentence:** delivering a
+notification necessarily involves your browser's push service, and those are
+not ours and mostly not in the EU. See the next section. "Your account data
+stays in the EU" is accurate; "your data never leaves the EU" is not, and must
+not be printed.
 
 ## Push subscription endpoints are the sensitive bit
 
@@ -114,14 +105,13 @@ unusual:
   subscriptions, settings, group memberships, the contacts blob and blocks,
   immediately and synchronously. Nothing to anonymise because there is nothing pseudonymous
   left behind. Handles are never reissued.
-* **Erasure reaches the two cross-border exceptions too**, and must be
-  verifiable: deleting an account writes an alias tombstone into the
-  replication log so every region drops the directory row, and drops the
-  roster rows at each group's region using the local `group_memberships`
-  mirror. Both are fire-and-forget to peers but retried until acknowledged; a
-  region that was partitioned during a deletion must reconcile on reconnect.
-  Erasure that silently stops at the regional boundary is the most likely
-  compliance failure in this design — build the reconciliation test first.
+* **Erasure is one local transaction**, which is the largest single benefit of
+  running one region. Foreign-key cascades from `accounts` remove handles,
+  alias, subscriptions, settings, group rows, the contacts blob and blocks in
+  one go, and there is no peer to notify, no tombstone to replicate and no
+  partitioned region to reconcile with on reconnect. Cross-border erasure was
+  the most likely compliance failure in the multi-region draft; it no longer
+  exists, and it comes back with the second region.
 * **Rectification** — everything is user-editable in the client.
 * **We cannot service a request from someone who has lost their key**, because
   we have no way to identify them and no way to authenticate the claim. This is
@@ -130,23 +120,20 @@ unusual:
 * **Inactive accounts** are deleted after 24 months of no `last_seen_day`
   update, after in-app warnings while the account is still reachable.
 
-## Multi-region
+## Single region
 
-**Regional independence, not replication.** Each region is a standalone
-deployment with its own SQLite file. Apart from the opt-in alias directory and
-foreign-region group roster rows above, no user data is replicated across
-borders at rest, so adding a US or APAC region does not create a transfer of EU
-user data.
+Each deployment is a standalone Go binary with its own SQLite file, and there
+is exactly one of them, in the EU. No user data is replicated anywhere, so
+there is no transfer of EU user data to analyse beyond the push services below.
 
-Cross-region pings carry a handle and nothing else — no sender, no IP, no
-content — forwarded over mTLS to the owning region. That payload contains no
-personal data about the sender and only a pseudonymous identifier for the
-recipient, which keeps the cross-border story trivial.
+Users do not pick a region and are not asked about one. Handles still carry a
+region character (always `e`) for the reason set out in
+[IDENTITY.md](IDENTITY.md); it reveals nothing while there is one region.
 
-Users pick a region at signup (default nearest, overridable, and it should be
-possible to deliberately choose EU from anywhere). The handle prefix makes the
-region visible, which is honest: you can tell where your data lives by looking
-at your own handle.
+Adding a US or APAC region later is a genuine change to this document, not a
+deployment detail: it would create transfers, reintroduce cross-border erasure,
+and require the disclosures in [DISCOVERY.md](DISCOVERY.md). Treat it as a
+privacy review, not an ops ticket.
 
 ## Other obligations to plan for
 
@@ -157,7 +144,7 @@ at your own handle.
 * **Breach posture.** Worst-case compromise leaks handles and push endpoints —
   bad, but no content, no history, no contact details, and no social graph
   beyond group rosters. Contacts blobs would leak as ciphertext we hold no key
-  for. Document that in the incident plan; it is genuinely
+  for, and the blast radius is one region. Document that in the incident plan; it is genuinely
   reassuring and worth being able to say quickly.
 * **Transparency report.** Trivial to produce and good for trust: we have no
   ping data to hand over, and we can say so with numbers.

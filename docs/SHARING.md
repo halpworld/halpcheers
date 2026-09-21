@@ -29,7 +29,7 @@ https://halp.to/@kenth
 ```
 
 Same page, same one-tap send, but memorable enough to say out loud. Aliases are
-global — one namespace across every region — so an alias link works from
+one flat namespace, so an alias link works from
 anywhere without the sender knowing or caring where the recipient's account
 lives. See [DISCOVERY.md](DISCOVERY.md).
 

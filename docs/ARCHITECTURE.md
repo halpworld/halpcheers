@@ -53,12 +53,10 @@ browser extensions, desktop and a TUI first changes three things:
                     Browser + extension service workers
 
   SQLite (WAL) ──── accounts, handles, aliases, subscriptions, settings,
-                    groups, blocks, aggregate counters.  Never pings.
-                    + alias_directory: the one globally replicated table.
+                    groups, contacts_blob, blocks, aggregate counters.
+                    Never pings.
 
-  Peer link  ─────── mTLS HTTP/2 to sibling regions: forward pings by handle
-                     prefix, pull the alias claim log, read group rosters.
-                     Off the hot path except the forward itself.
+  One region, so: no peer link, no replication, no registry. See DISCOVERY.md.
 ```
 
 Everything on one box. One Go binary, one SQLite file, no Redis, no message
@@ -145,7 +143,7 @@ Mitigations, in order of preference:
 1. Most users are browser users on Web Push and hold no connection at all.
 2. Idle TUI/desktop clients back off to a long-poll after `idle.demote_after`.
 3. Beyond one box, shard by handle region prefix onto a second box. Handles
-   carry their region (see [IDENTITY.md](IDENTITY.md)) so routing needs no
+   reserve a region character (see [IDENTITY.md](IDENTITY.md)) so routing needs no
    shared state.
 
 **SQLite.** Reads are served from an in-process LRU and the OS page cache; writes
@@ -232,12 +230,8 @@ halp/
 │   │   ├── push/            # RFC 8291 Web Push (stdlib crypto, no deps)
 │   │   ├── stream/          # SSE hub
 │   │   ├── store/           # SQLite, hand-written SQL, no ORM
-│   │   ├── region/          # handle prefix routing + peer forwarding
-│   │   └── directory/       # global alias replica + claim log sync
+│   │   └── region/          # handle prefix minting + validation (no routing yet)
 │   ├── go.mod
-│   └── Dockerfile
-├── registry/                # halp-registry: the alias claim serialiser
-│   ├── cmd/halp-registry/   # one table, three endpoints, mTLS peer-only
 │   └── Dockerfile
 ├── web/                     # TypeScript core: web app + shared UI/logic
 ├── extension/               # MV3 (Chrome, Firefox). No Safari extension — see DELIVERY.md
@@ -249,22 +243,21 @@ halp/
 └── AGENTS.md
 ```
 
-### The second deployable
+### One deployable
 
-`halp-registry` is the only thing outside `server/` that has to run. It exists
-because the alias namespace is global and two regions must not hand out
-`@kenth` at once ([decisions 11 and 12](OPEN-QUESTIONS.md#decided)). It holds
-one table, exposes three endpoints over mTLS to peer regions only, and is off
-the hot path entirely — sending, receiving and resolving all read local
-replicas, so if the registry is down the only thing that breaks is claiming a
-new alias.
+`halpd` is the only thing that has to run: one Go binary, one SQLite file, one
+region ([decision 22](OPEN-QUESTIONS.md#decided)). There is no peer link, no
+alias replication and no `halp-registry`.
 
-It is small enough to run as its own unit on the `eu-1` box until a second
-region exists. The point is that it is a separate *service* with its own
-interface, not a separate *machine*: promoting a region to primary would make
-that region special and put its uptime in front of another region's features.
+`halp-registry` is designed — it serialises alias claims so that two regions
+cannot hand out `@kenth` at once ([decisions 11 and 12](OPEN-QUESTIONS.md#decided))
+— and it is **not built**, because with one region a `PRIMARY KEY` is the whole
+of global uniqueness. It arrives with the second region, seeded by replaying
+this region's `aliases` table. Keeping it out is worth more than the design was:
+a second deployable in a project whose pitch is "one binary and a SQLite file"
+is a real cost.
 
-## Dependency policy
+## Dependency policy## Dependency policy
 
 Go server: stdlib plus `chi`, `modernc.org/sqlite` or `mattn/go-sqlite3`, and a
 Prometheus client. Web Push encryption is implemented in-house against

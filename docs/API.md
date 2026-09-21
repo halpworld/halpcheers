@@ -49,13 +49,13 @@ GET    /v1/handles               → [ { handle, label, kind, paused, policy, co
 POST   /v1/handles               { label, kind } → { handle }
 PATCH  /v1/handles/{handle}      { label?, paused?, policy? }
 DELETE /v1/handles/{handle}      burn — permanent, never reissued
-PUT    /v1/alias                 { alias, handle }   global claim, see DISCOVERY.md
+PUT    /v1/alias                 { alias, handle }   see DISCOVERY.md
 DELETE /v1/alias
 ```
 
 There is deliberately **no** `GET /v1/resolve/{alias}`. Resolution happens
-inside the send path so that probing the global alias namespace costs the same
-as sending. See [DISCOVERY.md](DISCOVERY.md).
+inside the send path so that probing the alias namespace costs the same as
+sending. See [DISCOVERY.md](DISCOVERY.md).
 
 ### Sending
 
@@ -67,12 +67,13 @@ POST   /v1/ping/{target}         → 202 Accepted, empty body, < 3 ms
 endpoint. No body. No idempotency key — the pair filter already collapses
 repeats.
 
-Routing is lookup-free for handles: the first character is the home region, so
-a non-local prefix is validated, enqueued and forwarded to the owning region
-over the inter-region link, still returning `202` locally. An alias resolves
-against the local replica of the global directory first, then follows the same
-path. Unknown target, paused handle, rate-limited, blocked and delivered are
-all indistinguishable to the sender.
+An alias resolves against the `aliases` table first, then follows the same
+path. Unknown target, paused handle, rate-limited, blocked and delivered are all
+indistinguishable to the sender.
+
+Handles carry a region character (always `e` today) but nothing routes on it
+yet; there is one region. See [DISCOVERY.md](DISCOVERY.md) for why the
+character is reserved from the first handle anyway.
 
 ### Receiving
 
@@ -124,34 +125,12 @@ GET    /overlay/{token}          SSE overlay for OBS (phase 3, revocable token)
 GET    /healthz  /readyz  /metrics
 ```
 
-### Inter-region (mTLS, peer-only, never public)
+### Inter-region
 
-```
-POST   /peer/v1/forward          { handle, n }   already validated upstream
-GET    /peer/v1/aliases?since=   → append-only claim log for replication
-GET    /peer/v1/groups/{id}/roster              cross-region roster read
-```
-
-`forward` carries a handle and a count. No sender, no IP, no content.
-
-### `halp-registry` (separate service, mTLS, peer-only, never public)
-
-The alias namespace is global, so claims need one serialising authority. It is
-its own deployable rather than a designated primary region — see
-[DISCOVERY.md](DISCOVERY.md).
-
-```
-POST   /registry/v1/claim        { alias, handle, owner_region } → { seq } | conflict
-POST   /registry/v1/release      { alias, owner_region }         → { seq }   (tombstone)
-GET    /registry/v1/log?since=   → append-only claim log
-```
-
-A region authenticates the user, checks the reserved list, then claims on their
-behalf. The registry sees `(alias, handle, owner_region)` — never an account, a
-session, an end-user IP or a ping. It has **no public DNS name and no
-unauthenticated read path**: a public read endpoint here would rebuild, on the
-back door, exactly the enumeration oracle that `GET /v1/resolve/{alias}` was
-deleted to avoid.
+None. There is one region ([decision 22](OPEN-QUESTIONS.md#decided)), so there
+is no peer link, no `/peer/v1/*` surface and no `halp-registry`. The design for
+all three is parked in [DISCOVERY.md](DISCOVERY.md) against the day a second
+region exists.
 
 ## SQLite schema (draft)
 
@@ -162,7 +141,7 @@ WAL mode, `synchronous=NORMAL`, `foreign_keys=ON`, single writer goroutine,
 CREATE TABLE accounts (
   id            INTEGER PRIMARY KEY,
   key_hash      BLOB NOT NULL UNIQUE,   -- Argon2id of auth_secret, NOT of the account key
-  region        TEXT NOT NULL,
+  region        TEXT NOT NULL DEFAULT 'eu-1',  -- constant for now; the handle prefix derives from it
   created_day   INTEGER NOT NULL,       -- days since epoch, NOT a timestamp
   last_seen_day INTEGER NOT NULL,
   send_tier     INTEGER NOT NULL DEFAULT 0,
@@ -183,26 +162,14 @@ CREATE TABLE handles (
 );
 CREATE INDEX handles_by_account ON handles(account_id);
 
--- Aliases owned by THIS region's accounts. Source of truth for our own rows.
+-- One region, so the PRIMARY KEY is the whole of global uniqueness.
+-- A second region would add a replicated directory alongside this; see DISCOVERY.md.
 CREATE TABLE aliases (
   alias       TEXT PRIMARY KEY,
   account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   handle      TEXT NOT NULL REFERENCES handles(handle) ON DELETE CASCADE,
-  seq         INTEGER NOT NULL,       -- position in this region's claim log
   created_day INTEGER NOT NULL
 );
-
--- The global directory: every region's aliases, replicated read-only.
--- The ONLY globally replicated table. Public by nature, opt-in. See DISCOVERY.md.
-CREATE TABLE alias_directory (
-  alias        TEXT PRIMARY KEY,
-  handle       TEXT NOT NULL,          -- NOT a FK: may belong to another region
-  owner_region TEXT NOT NULL,
-  seq          INTEGER NOT NULL,
-  tombstone    INTEGER NOT NULL DEFAULT 0,
-  created_day  INTEGER NOT NULL
-);
-CREATE INDEX alias_dir_sync ON alias_directory(owner_region, seq);
 
 CREATE TABLE subscriptions (
   id          INTEGER PRIMARY KEY,
@@ -234,34 +201,24 @@ CREATE TABLE groups (
   created_day      INTEGER NOT NULL
 );
 
--- Roster, at the GROUP's home region. account_id is NULL for foreign members:
--- their account lives in their own region and we only hold what the roster needs.
+-- One table, because one region. The earlier draft split the roster from a
+-- member-side mirror so that erasure and export could run without reaching into
+-- another region; with a real FK here, ON DELETE CASCADE does that for free.
+-- The split comes back with the second region.
 CREATE TABLE group_members (
-  group_id      INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-  member_region TEXT NOT NULL,
-  account_id    INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
-  display_name  TEXT NOT NULL,
-  note          TEXT,
-  handle        TEXT NOT NULL,         -- group-scoped, minted at the member's region
-  role          TEXT NOT NULL DEFAULT 'member',
-  joined_day    INTEGER NOT NULL,
+  group_id     INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+  display_name TEXT NOT NULL,
+  note         TEXT,
+  handle       TEXT NOT NULL REFERENCES handles(handle) ON DELETE CASCADE,
+  role         TEXT NOT NULL DEFAULT 'member',
+  joined_day   INTEGER NOT NULL,
   PRIMARY KEY (group_id, handle)
 );
-
--- The member's own side, at the MEMBER's home region. Lets account deletion and
--- data export work locally without reaching into another region.
-CREATE TABLE group_memberships (
-  account_id   INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-  group_id     INTEGER NOT NULL,
-  group_region TEXT NOT NULL,
-  handle       TEXT NOT NULL REFERENCES handles(handle) ON DELETE CASCADE,
-  joined_day   INTEGER NOT NULL,
-  PRIMARY KEY (account_id, group_id, group_region)
-);
+CREATE INDEX group_members_by_account ON group_members(account_id);
 
 -- Opaque to the server: sealed with contacts_key, which never leaves the device.
--- Home region only; deliberately NOT replicated, so it is not a third
--- cross-border exception. See DISCOVERY.md.
+-- See DISCOVERY.md.
 CREATE TABLE contacts_blob (
   account_id  INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
   blob        BLOB NOT NULL,          -- AES-256-GCM, padded to a 4 KiB boundary

@@ -57,20 +57,14 @@ box fall over.
 
 * Desktop app polish: autostart, per-handle view, auto-update.
 * TUI (Bubble Tea): single static binary, SSE, `halp send <handle>`.
-* Aliases, and with them the global alias directory: replication log, local
-  replica, alias-in-send-path resolution. Aliases are meaningless if they are
-  per-region, so the directory is not separable from the feature.
-* `halp-registry`, the second deployable: one table, three mTLS peer-only
-  endpoints, serialising global alias claims
-  ([decisions 11 and 12](OPEN-QUESTIONS.md#decided)). It ships with aliases
-  because nothing else needs it and aliases cannot ship without it. Initially
-  it runs as its own unit on the `eu-1` box.
+* Aliases: one table, claimed against a reserved list, resolved inside the send
+  path. With one region ([decision 22](OPEN-QUESTIONS.md#decided)) this is a
+  primary key — no directory, no replication log, no registry.
 * Contacts sync: HKDF key split so the account key stops leaving the device,
   plus the opaque, padded, size-capped blob and its merge-on-conflict client
   logic ([decision 14](OPEN-QUESTIONS.md#decided)). The key split touches the
   login path, so it lands whole rather than being retrofitted.
-* Groups: invites, roster, group-scoped handles, admin, minimum group size
-  (counted across regions).
+* Groups: invites, roster, group-scoped handles, admin, minimum group size.
 * Badges (SVG, plain — **no public counter in phase 1 or 2**, see
   [decision 8](OPEN-QUESTIONS.md#decided)), rich link previews.
 
@@ -78,10 +72,16 @@ box fall over.
 
 * OBS overlay with revocable tokens; streamer handle presets.
 * Twitch/YouTube chat bot as a thin API client.
-* Second region, if warranted — exercises prefix routing, alias replication,
-  cross-region group rosters and, most importantly, cross-region erasure
-  reconciliation. Write that test before the second region exists, using two
-  local instances.
+* Second region, **only if warranted**, and costed honestly rather than
+  assumed. It is not a deployment: it adds peer routing, alias replication, the
+  `halp-registry` deployable, a roster/mirror split in the group schema,
+  cross-border erasure reconciliation, and a privacy review that replaces the
+  "your account data stays in the EU" line. The design is parked in
+  [DISCOVERY.md](DISCOVERY.md); the erasure reconciliation test should be
+  written first, against two local instances.
+
+  Phase 1 pays exactly one thing forward for this: the handle region prefix,
+  which cannot be retrofitted onto handles already printed on stickers.
 * Public transparency report.
 
 ## Phase 4 — Mobile, if feasible

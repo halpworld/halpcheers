@@ -52,28 +52,21 @@ there is no presence, no last-seen, no activity feed.
 Owner departure with no transfer promotes the longest-tenured admin, else the
 group is archived after 30 days.
 
-## Groups span regions
+## Groups and regions
 
-A group lives in one region; its members do not have to. Your dev team can be
-half in eu-1 and half in ap-1 and nobody has to know that.
+There is one region ([decision 22](OPEN-QUESTIONS.md#decided)), so a group, its
+roster, its members and their accounts all live in `eu-1`. There is no join
+screen disclosure to write, no cross-region roster read, and no reconciliation
+between a member's region and a group's.
 
-* The group record and roster live in the **group's** home region.
-* Joining mints your group-scoped handle at **your own** region, so it carries
-  your prefix and self-routes like any other handle. Pinging a teammate needs
-  no directory and no cross-region lookup.
-* Your account, subscriptions and settings never leave your region. The group's
-  region holds only what a roster needs: display name, note, and the
-  group-scoped handle.
-* Roster reads are a small, cacheable cross-region read.
-* Leaving burns the handle at your region and drops the roster row at theirs;
-  both sides are reconciled so a partitioned region cannot resurrect a
-  departed member.
+This also collapses the schema: the earlier draft split the roster from a
+member-side mirror so that erasure and export could run without reaching into
+another region. One `group_members` table with a real foreign key does both, and
+`ON DELETE CASCADE` handles leaving and account deletion. See
+[API.md](API.md).
 
-**Say this at the join screen:** *"This group is hosted in ap-1. Your display
-name and group handle will be stored there."* It is user-initiated and minimal,
-but it is real, and it is the reason the marketing line is "your account lives
-in your region" rather than "your data never leaves your region". It belongs in
-the data inventory in [PRIVACY.md](PRIVACY.md).
+The split, and the disclosure, come back with a second region — the design is
+parked in [DISCOVERY.md](DISCOVERY.md).
 
 ## Abuse considerations
 
@@ -89,9 +82,6 @@ its own limits on top of the global ones in [ABUSE.md](ABUSE.md):
   both configurable — these are the anti-amplification ceilings, not product
   limits, and should be raised deliberately.
 * Removing a member is instant and silent to them.
-* Cross-region groups do not get a bigger budget. Rate limits apply at the
-  recipient's own region, which sees all traffic to its own handles no matter
-  where it entered the system.
 * Report-abuse inside a group additionally offers "mute this group", which is
   just pausing the group-scoped handle.
 
@@ -114,9 +104,8 @@ configuration and not a per-group admin setting: it exists to protect members
 from deanonymisation by inference, and the three-person group whose admin would
 want to switch it off is exactly the case it is there for.
 
-It counts **members, wherever they are** ([decision 15](OPEN-QUESTIONS.md#decided)).
-A cross-region group of five is a group of five; the risk the floor guards
-against is how many people could be guessed between, and that does not care
-which region anyone's account lives in. No mechanism is needed to make this
-work: the group's home region already holds the full roster including
-foreign-region members, so the count is a local one.
+It counts **members, wherever they are** ([decision 15](OPEN-QUESTIONS.md#decided)),
+which with one region is a `COUNT(*)` over the roster. The decision still means
+something later: a cross-region group of five is a group of five, because the
+risk the floor guards against is how many people could be guessed between, and
+that does not care where anyone's account lives.

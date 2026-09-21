@@ -6,53 +6,11 @@ challenging. Resolve the blocking ones before Phase 1 code.
 Answered items move to [Decided](#decided) at the bottom rather than being
 deleted, so the reasoning survives.
 
-## Global discovery
-
-*Added after the "how do I find my friend in Hong Kong" question. See
-[DISCOVERY.md](DISCOVERY.md).*
-
-13. **Do per-IP rate limits need to be shared across regions?**
-    *Recommended answer below; needs a yes.*
-
-    Every rate limit in the system is a token bucket in the memory of one box.
-    Nothing is shared between regions, because a cross-region read on the send
-    path would blow the 3 ms budget.
-
-    For most limits that is fine, and the first draft of this question
-    overstated the problem by not saying so:
-
-    * A **recipient's** limits run at the recipient's home region, which sees
-      100% of the traffic to its own handles no matter where it entered the
-      system. No multiplication.
-    * A **sender account's** limits run at that account's home region, and an
-      account has exactly one home region. No multiplication.
-
-    What *does* multiply is anything keyed to something with no home region —
-    in practice the two IP-keyed brakes: the signup bucket and the
-    login-attempt bucket. One IP can sign up in `eu-1`, `us-1` and `ap-1` at
-    once; each box sees a third of the attempts, each thinks the IP is well
-    inside its budget, and the attacker gets 3× the intended signup rate. That
-    matters because Sybil accounts are the input to every other abuse path.
-
-    Four ways to answer it:
-
-    | | Approach | Cost |
-    | --- | --- | --- |
-    | a | Static split — each region gets `global / N` | free; unfair, since a region holding 90% of users gets 1/N of the budget while the rest sits idle |
-    | b | Shared counters behind signup | correct; adds a network round-trip and a replicated store to a path that at least is not hot |
-    | c | Accept the multiplier, lean on proof-of-work | free |
-    | d | Regions gossip per-IP counts over the peer link every ~60 s | adapts fairly; more moving parts |
-
-    **Recommended: (c).** Proof-of-work does not divide. Signup costs ~1–2 s of
-    client CPU *per attempt*, so spreading across N regions costs the attacker
-    exactly N× the CPU — the bucket is a brake, PoW is the price, and only the
-    brake multiplies. Combined with the fact that the limits actually
-    protecting users do not multiply at all, the residual risk is a faster
-    account farm for an attacker who is already paying full price per account.
-
-    Revisit if the region count ever gets large enough for the multiplier to
-    matter, and then do (d) over the peer link that already exists rather than
-    (b).
+**Scope note:** [decision 22](#decided) cut the system to
+one region. That closed question 13 outright and turned decisions 11 and 12
+into designs we are not building yet. They are kept because the reasoning is
+expensive to rediscover and because one phase-1 decision — the handle prefix —
+only makes sense in their light.
 
 ## Operational
 
@@ -203,6 +161,9 @@ list. See [IDENTITY.md](IDENTITY.md) and [DISCOVERY.md](DISCOVERY.md).
 
 ### 11. Alias uniqueness → **a central registry**, not hashed sharding
 
+*Designed, not built — [decision 22](#decided) made it unnecessary until there is
+a second region. Kept because that is when the reasoning will be needed.*
+
 One authority serialises alias claims. Sharding the namespace by
 `hash(alias) mod regions` was the alternative; it removes the central component
 but adds moving parts to every region and makes adding a region a namespace
@@ -220,6 +181,8 @@ rebuilt if the registry loses its disk. It is an authority for *serialising*
 claims, not the sole copy of the data.
 
 ### 12. Where the registry runs → **a separate tiny service**
+
+*Designed, not built, for the same reason as 11.*
 
 Not a designated primary region. Promoting one region would make it special,
 which is what the rest of the design spends its effort avoiding, and it would
@@ -242,10 +205,33 @@ precisely the alias enumeration oracle that
 [DISCOVERY.md](DISCOVERY.md) deliberately removed, rebuilt by accident on the
 back door.
 
-The honest cost: this is the second deployable in a design that was proud of
-having one. It is small enough to run as a separate unit on the `eu-1` box
-until there is a second region — the point is that it is a separate *service*
-with its own interface, not a separate *machine*.
+The honest cost: this is a second deployable in a design that was proud of
+having one. That cost is exactly why decision 22 does not pay it yet. When it
+is paid, the point is that the registry is a separate *service* with its own
+interface, not necessarily a separate *machine* — it can share a box with
+`eu-1` at first.
+
+**Bootstrapping is easy because we waited.** The whole namespace will be one
+region's `aliases` table, so the registry is seeded by replaying it.
+
+### 13. Per-IP rate limits across regions → **moot; recommendation stands for later**
+
+Closed by decision 22. With one region there is one set of buckets and nothing
+multiplies.
+
+The analysis is kept because it survives the simplification. The question as
+first written overstated the problem: a recipient's limits run where the
+recipient's account lives, a sender's where the sender's does, and an account
+has one home region, so **neither multiplies across regions**. Only limits keyed
+to something with no home region do — in practice the two IP-keyed brakes on
+signup and login.
+
+The recommendation, for whenever a second region exists: **accept the
+multiplier**. Proof-of-work does not divide. Signup costs ~1–2 s of client CPU
+*per attempt*, so spreading across N regions costs the attacker N× the CPU —
+the bucket is a brake, PoW is the price, and only the brake multiplies. If the
+region count ever grows enough for that to matter, gossip per-IP counts over
+the peer link every ~60 s rather than putting a shared store behind signup.
 
 ### 14. Contacts sync → **an opaque encrypted blob the server cannot read**
 
@@ -302,7 +288,47 @@ read the blob, so it could not power any of that even if we forgot ourselves.
 
 ### 15. Minimum group size across regions → **members, wherever they are**
 
+*Trivially satisfied under [decision 22](#decided); the reasoning still binds if
+a second region arrives.*
+
 Confirmed. `groups.min_size` counts every member on the roster regardless of
 which region their account lives in. No mechanism is needed for this: the
 group's home region already holds the full roster, including foreign-region
 members, so the count is a local one.
+
+### 22. How many regions → **one, `eu-1`**
+
+EU-first was always the plan; this makes it EU-only until there is a reason to
+change. The multi-region machinery was the single largest source of complexity
+in the design and none of it was buying anything yet.
+
+**What it deletes.** The globally replicated `alias_directory`, the append-only
+claim log, the mTLS peer link, `/peer/v1/*`, the `halp-registry` deployable,
+the roster/mirror split in the group schema, cross-border erasure
+reconciliation, and the join-screen disclosure for foreign-hosted groups. Alias
+uniqueness becomes a `PRIMARY KEY`. Account deletion becomes one cascading
+transaction. The project goes back to being one binary and one SQLite file,
+which is what the README promises.
+
+**What it buys beyond simplicity.** "Your account data stays in the EU" becomes
+an accurate sentence, where the multi-region draft could only say "your account
+lives in your region". It travels with a footnote — delivering a notification
+still involves a third-party push service — but it is a real improvement and
+worth protecting.
+
+**What it costs, which is the part to watch.** Everything above is reversible
+by building it later. Exactly one thing is not: **the handle region prefix**,
+which phase 1 keeps. Every handle starts with `e` and nothing reads it.
+
+A handle is public and permanent — GitHub READMEs, printed QR codes, cached
+badges. Mint them without a prefix and a later region leaves two options:
+break every handle in existence, or add a global `handle → region` lookup,
+which is the enumeration oracle this design deliberately removed, rebuilt for
+handles. Reserving one character costs nothing, because the 13-character budget
+was always 1 region character plus 60 bits. `accounts.region` stays for the
+same reason.
+
+**Adding a second region is a privacy review, not an ops ticket.** It
+reintroduces transfers, cross-border erasure and the disclosures above. The
+design is parked in [DISCOVERY.md](DISCOVERY.md) precisely so the cost is
+visible before anyone commits to it.

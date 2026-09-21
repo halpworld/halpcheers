@@ -54,7 +54,8 @@ e7k4p2m9qx3v          →   https://halp.to/h/e7k4p2m9qx3v
 ```
 
 13 characters of Crockford base32. The first character encodes the home region
-(see below); the remaining 12 carry 60 bits of entropy, which makes the space
+— always `e` today, and see [Regions](#regions) for why it is there at all —
+and the remaining 12 carry 60 bits of entropy, which makes the space
 unscannable in practice. Handles are the *only* thing a sender ever sees.
 
 **An account may hold many handles, and this is the point.** A handle is a
@@ -91,8 +92,9 @@ try `@john`. Therefore:
   fresh handle and every previously-harvested reference dies with the old one.
 * Aliases get their own, stricter inbound rate limit and their own pause switch,
   independent of the handle behind them.
-* **The alias namespace is global**, not per-region — `@kenth` means one person
-  everywhere. It is the only globally replicated table in the system. See
+* **The namespace is flat.** `@kenth` is one person. With one region that is
+  just a primary key; keeping it flat is what makes a second region a real
+  piece of work rather than a config change. See
   [DISCOVERY.md](DISCOVERY.md).
 * **There is no resolve endpoint.** `POST /v1/ping/{target}` takes a handle or
   an alias and resolves internally, so probing the namespace costs exactly as
@@ -103,44 +105,39 @@ try `@john`. Therefore:
   with no activity for 12 months is released.
 * One alias per account. Revisit if there is demand.
 
-The rules above are settled ([decision 10](OPEN-QUESTIONS.md#decided)), and so
-is how the global namespace stays unique across regions: a single **central
-registry** serialises claims, running as its own small service rather than as a
-promoted primary region ([decisions 11 and 12](OPEN-QUESTIONS.md#decided)). It
-is peer-only over mTLS, with no public read path, because a public lookup there
-would be the enumeration oracle we deleted above. See
+The rules above are settled ([decision 10](OPEN-QUESTIONS.md#decided)).
+Uniqueness needs no machinery while there is one region; when there is a
+second, a central registry serialises claims as its own small service
+([decisions 11 and 12](OPEN-QUESTIONS.md#decided)) and is seeded by replaying
+this region's `aliases` table. That is designed and unbuilt — see
 [DISCOVERY.md](DISCOVERY.md).
 
 ## Regions
 
-We will host in the EU and may add regions if one gets popular. The design is
-**regional independence for account data, with one global namespace on top**:
-each region is a standalone deployment with its own SQLite file, and the only
-thing replicated everywhere is the opt-in `alias → handle` directory. Account
-keys, subscriptions, settings, blocks and counters never leave their home
-region, which keeps the transfer analysis in [PRIVACY.md](PRIVACY.md) short.
+**There is one: `eu-1`, in the EU** ([decision 22](OPEN-QUESTIONS.md#decided)).
+One deployment, one SQLite file, no replication, no peer link. Everything an
+account has lives there, which is what makes the transfer analysis in
+[PRIVACY.md](PRIVACY.md) a paragraph rather than a section.
 
-Nobody should ever have to know or pick a region to reach someone.
-[DISCOVERY.md](DISCOVERY.md) is the full account of how that holds.
+**The handle prefix stays anyway**, and this is the one place the single-region
+decision deliberately does not simplify. Every handle begins with `e`, and
+nothing reads that character today.
 
-The first character of a handle is its home region (`e` = eu-1, `u` = us-1,
-`a` = ap-1, …). Any region can therefore route a ping without shared state or a
-lookup: if the prefix is not mine, forward the already-validated job over a
-persistent mTLS HTTP/2 connection to the owning region and return 202. The
-forwarded message contains a handle and nothing else — no sender, no IP, no
-content — so cross-region traffic carries no personal data about the sender.
+The reason is that a handle is public and permanent: it goes on a GitHub
+README, into a QR code printed on a sticker, into a badge someone's CDN has
+cached. If we mint prefix-less handles now and add a region later, the choices
+are to break every handle in existence or to add a global `handle → region`
+lookup — and that lookup is precisely the enumeration oracle
+[DISCOVERY.md](DISCOVERY.md) removed, rebuilt for handles. Neither is
+recoverable; reserving one character is.
 
-An account lives in exactly one region, chosen at signup (default: nearest, user
-overridable). Region migration is out of scope for v1; the honest answer is
-"create a new account and repoint your alias" — which works precisely because
-the alias namespace is global and the repoint is visible everywhere.
+It also costs nothing. The 13-character budget was always 1 region character
+plus 60 bits, so the entropy above is what it always was.
+`accounts.region` stays in the schema for the same reason: one TEXT column,
+constant, and the value the prefix derives from.
 
-Two caveats worth stating rather than burying. A handle's prefix reveals its
-owner's region to anyone holding the handle; that is the price of lookup-free
-routing and it is a coarse enough signal to accept. And a group hosted in
-another region stores its foreign members' display names and group handles
-there, so "your data never leaves your region" is not an accurate thing to
-print — "your account lives in your region" is.
+Region migration is out of scope; with one region there is nothing to migrate
+to. An account lives in `eu-1` and the client does not ask.
 
 ## Sender identity
 

@@ -78,25 +78,27 @@ pattern, not the path.
   way under a different `info` and is never transmitted. A change that makes the
   server see the account key breaks every client-side encryption claim at once.
   It must also never appear in a URL, QR code, log, metric or share link.
-* Account deletion is immediate, synchronous and complete. Handles are never
-  reissued. It must also reach the two cross-region exceptions below: an alias
-  tombstone into the replication log, and roster rows dropped at each group's
-  region. Erasure that stops at the regional boundary is a compliance bug.
-* **Account data never leaves its home region.** The `alias_directory` table is
-  the only globally replicated data in the system, and it holds an opt-in,
-  public-by-nature `alias → handle` mapping and nothing else. A foreign-region
-  group roster row is the only other cross-border storage, it is disclosed at
-  the join screen, and it carries only what a roster needs. Adding a third
-  exception needs the same treatment as invariant 1's — documented in
-  `docs/PRIVACY.md`, disclosed in the UI, and reachable by erasure.
+* Account deletion is immediate, synchronous and complete — one local
+  transaction, cascading from `accounts`. Handles are never reissued.
+* **One region: `eu-1`, in the EU.** No replication, no peer link, no
+  `halp-registry`, no `alias_directory`. Nothing we store leaves the EU, which
+  is a sentence the privacy policy prints; do not add anything that makes it
+  false. The multi-region design is parked in `docs/DISCOVERY.md` and adding a
+  second region is a privacy review, not a deployment.
+* **Handles reserve a region character anyway** — every handle starts with `e`
+  and nothing reads it. Do not "simplify" it away to reclaim 5 bits. Handles are
+  public and permanent, so a prefix cannot be retrofitted onto the ones already
+  in READMEs and QR codes, and the alternative later is a global
+  `handle → region` lookup, which is the existence oracle below rebuilt for
+  handles.
 * **No existence oracles.** There is no alias resolve endpoint; resolution
   happens inside `POST /v1/ping/{target}` so probing costs the same as sending.
   Do not add a lookup, validity check, autocomplete or "is this handle real?"
   helper, however convenient it would be for the client.
-* **The alias registry is never publicly reachable.** `halp-registry` serves
-  peer regions over mTLS only: no public DNS name, no unauthenticated read path,
-  no browsable log. A public read endpoint there is the enumeration oracle above
-  rebuilt on the back door, and it would not look like one in review.
+* **If `halp-registry` is ever built**, it serves peer regions over mTLS only:
+  no public DNS name, no unauthenticated read path, no browsable log. A public
+  read endpoint there is the enumeration oracle above rebuilt on the back door,
+  and it would not look like one in review. It does not exist today.
 
 ## Losses are acceptable; lying about them is not
 
