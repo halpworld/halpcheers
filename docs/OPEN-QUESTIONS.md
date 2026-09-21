@@ -431,3 +431,14 @@ multi-threaded write contention entirely), while the hot path serves reads from 
 in-process LRU cache and the operating system page cache. The operational stability
 of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
+
+### 29. Argon2id parameters and deterministic salt for auth_secret → **Argon2id (t=1, m=64 MiB, p=4) with deterministic salt**
+
+Decided: `accounts.key_hash` is computed as `Argon2id(auth_secret, salt="halp-argon2id-v1", t=1, m=64 MiB, p=4, keyLen=32)`.
+
+Reasoning:
+1. `auth_secret` is derived client-side via HKDF-SHA256 from the 16-digit cryptographically random account key (~53.15 bits entropy). The client submits only `auth_secret` to `POST /v1/session` without any public username or account identifier.
+2. Because there is no public account identifier submitted with login, account lookup requires querying `SELECT id FROM accounts WHERE key_hash = ?`. To support O(1) indexed lookup without iterating through every account in the database on every login attempt, the Argon2id hash must be deterministic for a given `auth_secret`.
+3. A fixed 16-byte domain salt (`"halp-argon2id-v1"`) combined with 64 MiB RAM and 4 threads satisfies RFC 9106 recommended parameters. Rainbow tables are impossible because the input possesses over 53 bits of high-entropy cryptographic randomness from `crypto/rand`. The 64 MiB memory hardness makes offline ASIC/GPU dictionary cracking prohibitively expensive.
+4. On the login endpoint, timing uniformity (AGENTS.md Invariant 7) is strictly preserved: rate-limited attempts and malformed inputs compute a dummy Argon2id hash with the identical parameters before returning, ensuring an attacker cannot distinguish between a non-existent account, bad credentials, and a tripped rate limiter by measuring response latency.
+
