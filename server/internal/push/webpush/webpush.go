@@ -448,12 +448,10 @@ func VerifyVAPID(authHeader string, expectedAudience string) (sub string, exp in
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to decode pubkey: %w", err)
 	}
-	if len(pubBytes) != P256KeyLength || pubBytes[0] != 0x04 {
-		return "", 0, errors.New("invalid uncompressed P-256 public key length")
+	pubKey, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), pubBytes)
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid uncompressed P-256 public key: %w", err)
 	}
-	x := new(big.Int).SetBytes(pubBytes[1:33])
-	y := new(big.Int).SetBytes(pubBytes[33:65])
-	pubKey := &ecdsa.PublicKey{Curve: elliptic.P256(), X: x, Y: y}
 
 	jwtParts := bytes.Split([]byte(jwtStr), []byte("."))
 	if len(jwtParts) != 3 {
