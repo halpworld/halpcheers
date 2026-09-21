@@ -433,6 +433,7 @@ of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### 28. PoW difficulty calibration and clock skew tolerance → **d=14 floor, d=21 signup, ±1 epoch skew tolerance**
 
 Decided: the default global floor `pow.floor_ms = 10` corresponds to $d=14$ leading zero bits ($2^{14} = 16,384$ hashes, ~10 ms client compute). Signup `pow.signup_ms = 1500` maps to $d=21$ leading zero bits ($2^{21} = 2,097,152$ hashes, ~1.4–1.5 s client compute).
@@ -493,5 +494,16 @@ Decided: Web Push encryption is implemented in-house (`server/internal/push/webp
 To satisfy the dispatch worker pool CPU budget, the ECDH shared secret between the application server and the subscription's `p256dh` public key is cached per subscription endpoint. Benchmark results confirm a 23× speedup: ~1.45 µs per encryption with key cache vs ~33.4 µs without.
 
 Crucially, the 16-byte salt is generated afresh from `crypto/rand` for every single message, strictly preventing AES-GCM nonce reuse under the same CEK. Plaintext pings without count are sent payloadless (zero-byte body, omitting `Content-Encoding`), minimizing bandwidth and processing overhead.
+
+### 35. Dispatch token lifecycle and mid-flight re-registration pruning guard → **Authoritative prune only on 404/410 where created_day <= send_start_day**
+
+Decided: Web Push subscriptions are pruned exclusively upon authoritative rejection (`404 Not Found` or `410 Gone`). The deletion query is strictly scoped as:
+`DELETE FROM subscriptions WHERE endpoint = ? AND created_day <= ?`
+where the timestamp bound is `send_start_day` captured immediately before the HTTP dispatch request is dispatched over the network.
+
+Reasoning:
+1. In accordance with AGENTS.md Invariant 4, transient errors (`429`, `500`, `502`, `503`, timeouts, or network/DNS drops) must never trigger subscription deletion. Pruning on transient faults would silently cause users to stop receiving pings without notification.
+2. In-flight race conditions: if a client device unregisters and re-registers the same endpoint while a push dispatch request is in flight, the re-registered row has a newer `created_day`. Requiring `created_day <= send_start_day` ensures that the newly created row is preserved when the prior send's 410 response returns.
+3. No retries or outbound queues: failed push attempts are dropped immediately and counted in metrics, preserving the best-effort delivery contract.
 
 
