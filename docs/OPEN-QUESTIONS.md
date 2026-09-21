@@ -411,3 +411,23 @@ The known weakness is the shared file: a dozen agents appending to the end of
 one Markdown file will produce merge conflicts. They are trivial ones — two
 additions at the end of a file — and the number claim keeps them from silently
 colliding. That is cheaper than losing the single-source property.
+
+### 27. SQLite driver choice → **modernc.org/sqlite (pure Go, CGO_ENABLED=0)**
+
+Decided: use `modernc.org/sqlite` instead of `mattn/go-sqlite3`.
+
+The decision between a pure Go SQLite implementation (`modernc.org/sqlite`) and a
+cgo wrapper around the C library (`mattn/go-sqlite3`) turns on operational
+simplicity and container footprint. With `modernc.org/sqlite`, the server binary
+compiles with `CGO_ENABLED=0` into a completely static executable. This allows the
+runtime container image to be built on top of `scratch` or distroless static
+without any C compiler toolchain, dynamic linker or libc dependencies. Cross-compilation
+across architectures (amd64/arm64) is trivial and requires no cross-gcc.
+
+The cost is slightly higher CPU overhead in pure query execution compared to
+native C SQLite. For Halp's architecture, this trade-off is strongly favorable:
+writes are rare and funneled through a single dedicated writer goroutine (avoiding
+multi-threaded write contention entirely), while the hot path serves reads from an
+in-process LRU cache and the operating system page cache. The operational stability
+of a pure Go static binary in a scratch container cleanly satisfies the "one
+deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
