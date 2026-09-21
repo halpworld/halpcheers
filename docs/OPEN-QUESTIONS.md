@@ -411,3 +411,26 @@ The known weakness is the shared file: a dozen agents appending to the end of
 one Markdown file will produce merge conflicts. They are trivial ones — two
 additions at the end of a file — and the number claim keeps them from silently
 colliding. That is cheaper than losing the single-source property.
+
+### 26. What gates the end of Phase 1 → **a red-team suite written by an agent that did not write the code**
+
+Phase 1's exit criteria in [ROADMAP.md](ROADMAP.md) were prose: a hostile person
+with a botnet cannot make the recipient's day worse than one digest, and cannot
+make the box fall over. Prose does not fail a build. The issue tracker now
+carries that sentence as an executable suite, and Phase 1 ships when it passes.
+
+It is organised as five attempts rather than as a test matrix — harassment,
+de-anonymisation, enumeration, a storage audit, and an availability attack —
+because that is how the failures arrive. Two of its checks are structural rather
+than behavioural, and deliberately so: the storage audit iterates `sqlite_master`
+and inspects every column of every table instead of asserting against a
+hand-written list, so a table added in a later phase cannot quietly escape either
+the no-pairs rule or account deletion.
+
+The constraint that costs something is that the suite must be written by an
+agent that worked on none of the tracks it tests. An agent that implemented the
+Bloom cascade will test the cascade it built, including its assumptions; the
+whole value here is an adversary who does not share them. In practice this means
+one track that cannot be started early by whoever happens to be free, and it
+means the suite is written late, against an assembled system, with no head start.
+That is the price of the only test that can actually say no.
