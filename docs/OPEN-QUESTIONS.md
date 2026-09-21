@@ -436,6 +436,7 @@ deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### 28. PoW difficulty calibration and clock skew tolerance → **d=14 floor, d=21 signup, ±1 epoch skew tolerance**
 
 Decided: the default global floor `pow.floor_ms = 10` corresponds to $d=14$ leading zero bits ($2^{14} = 16,384$ hashes, ~10 ms client compute). Signup `pow.signup_ms = 1500` maps to $d=21$ leading zero bits ($2^{21} = 2,097,152$ hashes, ~1.4–1.5 s client compute).
@@ -522,5 +523,9 @@ Reasoning:
 Decided: Settings updates via `PUT /v1/settings` strictly enforce config boundaries (`digest_window_s` [0, 86400], `max_per_hour` [1, 60], `min_count` [1, 1000], `quiet_start`/`quiet_end` [0, 23], valid IANA timezone `tz`, and mode `all`|`groups_only`|`paused`). Out-of-range inputs are rejected with 400 Bad Request rather than silently clamped. Quiet hours and timezones are evaluated as user preferences, not stored timestamps.
 
 Abuse reporting via `POST /v1/handles/{handle}/report-abuse` resolves the top sender from the in-memory Count-Min sketch for the handle (if owned by the calling session) and writes a single `(sender_account_id, handle, created_day)` row into `blocks`. The endpoint returns an identical 200 OK `{"status":"ok"}\n` response regardless of whether the handle exists, is owned by another account, has no recorded traffic, or successfully blocks a sender (invariants 6 and 7). Blocks are pruned after 365 days by `SweepExpiredBlocks`.
+
+### 38. Public landing pages and SVG badge semantics → **byte-identical responses, no-JS fallback, 300 ms perceived latency floor**
+
+Decided: Public endpoints `GET /h/{handle}` and `GET /@{alias}` serve byte-identical HTML and response headers across existing, nonexistent, paused, and blocked handles (invariant 7: no existence or timing oracle). The page is fully functional without JavaScript via a standard HTML form POST that transitions to a terminal "Sent." state. When JavaScript is present, client-side progressive enhancement holds a 300 ms perceived-latency floor before transitioning the button to "Sent." so that fast drops and accepted pings are indistinguishable to a human observer. The SVG badge at `GET /badge/{handle}.svg` renders a plain static "appreciate me" badge with no counter (decision 8) and immutable long-lived caching.
 
 
