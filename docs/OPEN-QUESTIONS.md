@@ -438,3 +438,12 @@ Decided: the default global floor `pow.floor_ms = 10` corresponds to $d=14$ lead
 
 Tolerance for clock skew on challenge epochs is set to $\pm 1$ adjacent epoch ($\pm 5$ minutes around the active epoch). Tokens for epochs older than `cur - 1` or future epochs beyond `cur + 1` are authoritatively rejected as expired. This accounts for reasonable client device clock drift without opening a precomputation window wider than 10 minutes. Challenges are derived deterministically via HMAC-SHA256 from a server-seeded rotating secret. Hot-path verification uses a stack-allocated buffer and `sha256.Sum256` achieving zero heap allocations and ~130 ns execution time, well inside the 2 µs request path budget.
 
+### 34. Web Push encryption and keypair caching → **in-house RFC 8291/8188 with stdlib crypto, per-subscription shared secret caching with fresh salt per message**
+
+Decided: Web Push encryption is implemented in-house (`server/internal/push/webpush/`) using pure Go stdlib (`crypto/ecdh`, `crypto/hkdf`, `crypto/aes`, `crypto/cipher`, `crypto/ecdsa`, `crypto/rand`) without any third-party dependencies.
+
+To satisfy the dispatch worker pool CPU budget, the ECDH shared secret between the application server and the subscription's `p256dh` public key is cached per subscription endpoint. Benchmark results confirm a 23× speedup: ~1.45 µs per encryption with key cache vs ~33.4 µs without.
+
+Crucially, the 16-byte salt is generated afresh from `crypto/rand` for every single message, strictly preventing AES-GCM nonce reuse under the same CEK. Plaintext pings without count are sent payloadless (zero-byte body, omitting `Content-Encoding`), minimizing bandwidth and processing overhead.
+
+
