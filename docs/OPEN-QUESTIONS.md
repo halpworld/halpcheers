@@ -432,11 +432,18 @@ in-process LRU cache and the operating system page cache. The operational stabil
 of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
 
+<<<<<<< HEAD
 ### 28. PoW difficulty calibration and clock skew tolerance → **d=14 floor, d=21 signup, ±1 epoch skew tolerance**
 
 Decided: the default global floor `pow.floor_ms = 10` corresponds to $d=14$ leading zero bits ($2^{14} = 16,384$ hashes, ~10 ms client compute). Signup `pow.signup_ms = 1500` maps to $d=21$ leading zero bits ($2^{21} = 2,097,152$ hashes, ~1.4–1.5 s client compute).
 
 Tolerance for clock skew on challenge epochs is set to $\pm 1$ adjacent epoch ($\pm 5$ minutes around the active epoch). Tokens for epochs older than `cur - 1` or future epochs beyond `cur + 1` are authoritatively rejected as expired. This accounts for reasonable client device clock drift without opening a precomputation window wider than 10 minutes. Challenges are derived deterministically via HMAC-SHA256 from a server-seeded rotating secret. Hot-path verification uses a stack-allocated buffer and `sha256.Sum256` achieving zero heap allocations and ~130 ns execution time, well inside the 2 µs request path budget.
+
+### 33. Coalesce accumulator eviction and memory bounds → **in-memory counter map bounded by fixed capacity, stale jobs discarded on ingestion**
+
+Decided: the coalesce accumulator (`server/internal/coalesce/`) aggregates incoming appreciation pings purely as an in-memory map keyed by recipient `core.AccountID` to an accumulator entry containing only a count $N$ and first/last seen timestamps. In accordance with Invariant 1, the entry contains no sender fields, handles, or message records.
+
+Stale jobs older than `dispatch.max_age` (30 s) are dropped on ingress and counted as `obs.DropReasonStale`. The accumulator has a fixed capacity bound (`max_recipients`, default 100,000) satisfying Invariant 8. Expired entries are extracted by the flush loop into `core.Digest` structs carrying only recipient ID and count $N$. The `/v1/pending` endpoint atomically clears and returns the pending count for cold-start and reconnection synchronization.
 
 ### 34. Web Push encryption and keypair caching → **in-house RFC 8291/8188 with stdlib crypto, per-subscription shared secret caching with fresh salt per message**
 
