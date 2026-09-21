@@ -431,3 +431,15 @@ multi-threaded write contention entirely), while the hot path serves reads from 
 in-process LRU cache and the operating system page cache. The operational stability
 of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
+
+### 35. Dispatch token lifecycle and mid-flight re-registration pruning guard → **Authoritative prune only on 404/410 where created_day <= send_start_day**
+
+Decided: Web Push subscriptions are pruned exclusively upon authoritative rejection (`404 Not Found` or `410 Gone`). The deletion query is strictly scoped as:
+`DELETE FROM subscriptions WHERE endpoint = ? AND created_day <= ?`
+where the timestamp bound is `send_start_day` captured immediately before the HTTP dispatch request is dispatched over the network.
+
+Reasoning:
+1. In accordance with AGENTS.md Invariant 4, transient errors (`429`, `500`, `502`, `503`, timeouts, or network/DNS drops) must never trigger subscription deletion. Pruning on transient faults would silently cause users to stop receiving pings without notification.
+2. In-flight race conditions: if a client device unregisters and re-registers the same endpoint while a push dispatch request is in flight, the re-registered row has a newer `created_day`. Requiring `created_day <= send_start_day` ensures that the newly created row is preserved when the prior send's 410 response returns.
+3. No retries or outbound queues: failed push attempts are dropped immediately and counted in metrics, preserving the best-effort delivery contract.
+
