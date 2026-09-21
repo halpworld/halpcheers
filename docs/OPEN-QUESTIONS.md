@@ -435,6 +435,7 @@ deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
 <<<<<<< HEAD
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 ### 28. PoW difficulty calibration and clock skew tolerance → **d=14 floor, d=21 signup, ±1 epoch skew tolerance**
 
 Decided: the default global floor `pow.floor_ms = 10` corresponds to $d=14$ leading zero bits ($2^{14} = 16,384$ hashes, ~10 ms client compute). Signup `pow.signup_ms = 1500` maps to $d=21$ leading zero bits ($2^{21} = 2,097,152$ hashes, ~1.4–1.5 s client compute).
@@ -515,5 +516,11 @@ Reasoning:
 1. In accordance with AGENTS.md Invariant 8, all per-connection allocations are bounded. Slow consumers who fail to read frames cause their 16-element buffer to fill, immediately triggering connection termination rather than allowing per-connection buffers to expand unboundedly.
 2. In accordance with the capacity budget in docs/ARCHITECTURE.md (12–20 KB/conn), measurements with 1,000 active connections demonstrate a heap footprint of ~4.56 KB per connection, ensuring 10,000 concurrent desktop/web clients consume less than 50 MB of RAM.
 3. Idle demotion to `GET /v1/pending` prevents inactive browser tabs from indefinitely exhausting connection limits while ensuring pings are never missed.
+
+### 37. Settings boundaries and abuse reporting semantics → **bounded validation, idempotent blocks, uniform 200 response**
+
+Decided: Settings updates via `PUT /v1/settings` strictly enforce config boundaries (`digest_window_s` [0, 86400], `max_per_hour` [1, 60], `min_count` [1, 1000], `quiet_start`/`quiet_end` [0, 23], valid IANA timezone `tz`, and mode `all`|`groups_only`|`paused`). Out-of-range inputs are rejected with 400 Bad Request rather than silently clamped. Quiet hours and timezones are evaluated as user preferences, not stored timestamps.
+
+Abuse reporting via `POST /v1/handles/{handle}/report-abuse` resolves the top sender from the in-memory Count-Min sketch for the handle (if owned by the calling session) and writes a single `(sender_account_id, handle, created_day)` row into `blocks`. The endpoint returns an identical 200 OK `{"status":"ok"}\n` response regardless of whether the handle exists, is owned by another account, has no recorded traffic, or successfully blocks a sender (invariants 6 and 7). Blocks are pruned after 365 days by `SweepExpiredBlocks`.
 
 
