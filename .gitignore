@@ -1,0 +1,22 @@
+# Binaries
+bin/
+/halpd
+/server/halpd
+
+# Data & SQLite
+*.db
+*.db-wal
+*.db-shm
+data/
+
+# OS and Editor
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Test artifacts
+*.out
+*.test
