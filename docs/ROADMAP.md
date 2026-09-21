@@ -57,11 +57,20 @@ box fall over.
 
 * Desktop app polish: autostart, per-handle view, auto-update.
 * TUI (Bubble Tea): single static binary, SSE, `halp send <handle>`.
-* Aliases, and with them the global alias directory: claim registry,
-  replication log, local replica, alias-in-send-path resolution. Aliases are
-  meaningless if they are per-region, so the directory is not separable from
-  the feature.
-* Groups: invites, roster, group-scoped handles, admin, minimum group size.
+* Aliases, and with them the global alias directory: replication log, local
+  replica, alias-in-send-path resolution. Aliases are meaningless if they are
+  per-region, so the directory is not separable from the feature.
+* `halp-registry`, the second deployable: one table, three mTLS peer-only
+  endpoints, serialising global alias claims
+  ([decisions 11 and 12](OPEN-QUESTIONS.md#decided)). It ships with aliases
+  because nothing else needs it and aliases cannot ship without it. Initially
+  it runs as its own unit on the `eu-1` box.
+* Contacts sync: HKDF key split so the account key stops leaving the device,
+  plus the opaque, padded, size-capped blob and its merge-on-conflict client
+  logic ([decision 14](OPEN-QUESTIONS.md#decided)). The key split touches the
+  login path, so it lands whole rather than being retrofitted.
+* Groups: invites, roster, group-scoped handles, admin, minimum group size
+  (counted across regions).
 * Badges (SVG, plain — **no public counter in phase 1 or 2**, see
   [decision 8](OPEN-QUESTIONS.md#decided)), rich link previews.
 

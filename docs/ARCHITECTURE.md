@@ -197,6 +197,7 @@ and windows can be reloaded on `SIGHUP`.
 | `groups.max_members` | 500 | reload | |
 | `groups.max_per_account` | 20 | reload | |
 | `alias.release_months` | 12 | reload | squatting release |
+| `contacts.max_bytes` | 64 KiB | reload | ceiling on the opaque contacts blob |
 | `blocks.ttl_days` | 365 | reload | the one durable pair record |
 | `subscriptions.prune_after_days` | 180 | reload | |
 
@@ -235,6 +236,9 @@ halp/
 │   │   └── directory/       # global alias replica + claim log sync
 │   ├── go.mod
 │   └── Dockerfile
+├── registry/                # halp-registry: the alias claim serialiser
+│   ├── cmd/halp-registry/   # one table, three endpoints, mTLS peer-only
+│   └── Dockerfile
 ├── web/                     # TypeScript core: web app + shared UI/logic
 ├── extension/               # MV3 (Chrome, Firefox). No Safari extension — see DELIVERY.md
 ├── desktop/                 # Tauri shell (macOS first, Win/Linux same build) — tray, notifications
@@ -244,6 +248,21 @@ halp/
 ├── docker-compose.yml
 └── AGENTS.md
 ```
+
+### The second deployable
+
+`halp-registry` is the only thing outside `server/` that has to run. It exists
+because the alias namespace is global and two regions must not hand out
+`@kenth` at once ([decisions 11 and 12](OPEN-QUESTIONS.md#decided)). It holds
+one table, exposes three endpoints over mTLS to peer regions only, and is off
+the hot path entirely — sending, receiving and resolving all read local
+replicas, so if the registry is down the only thing that breaks is claiming a
+new alias.
+
+It is small enough to run as its own unit on the `eu-1` box until a second
+region exists. The point is that it is a separate *service* with its own
+interface, not a separate *machine*: promoting a region to primary would make
+that region special and put its uptime in front of another region's features.
 
 ## Dependency policy
 

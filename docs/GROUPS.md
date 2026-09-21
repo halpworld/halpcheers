@@ -113,3 +113,10 @@ That floor is `groups.min_size`, default **5**. It is deliberately **operator**
 configuration and not a per-group admin setting: it exists to protect members
 from deanonymisation by inference, and the three-person group whose admin would
 want to switch it off is exactly the case it is there for.
+
+It counts **members, wherever they are** ([decision 15](OPEN-QUESTIONS.md#decided)).
+A cross-region group of five is a group of five; the risk the floor guards
+against is how many people could be guessed between, and that does not care
+which region anyone's account lives in. No mechanism is needed to make this
+work: the group's home region already holds the full roster including
+foreign-region members, so the count is a local one.

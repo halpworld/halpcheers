@@ -11,26 +11,48 @@ deleted, so the reasoning survives.
 *Added after the "how do I find my friend in Hong Kong" question. See
 [DISCOVERY.md](DISCOVERY.md).*
 
-11. **Alias uniqueness: central registry or hashed namespace sharding?** The
-    registry is simpler and its outage mode is benign (claims pause, everything
-    else works). Sharding removes the central component at the cost of more
-    moving parts. Decide before aliases ship, not after — migrating a live
-    namespace is unpleasant.
-12. **Where does the registry run**, if we pick it? A separate tiny service, or
-    a designated primary region? The latter is less to deploy and makes one
-    region special, which is the thing the rest of the design avoids.
-13. **Rate-limit budget splitting across regions.** Buckets are per-region and
-    in memory, so a scraper spread over N regions gets N× the budget on the
-    alias path. Setting per-region budgets to `global / N` is the cheap answer
-    and it penalises legitimate users in busy regions. Is that acceptable, or
-    do we need shared counters (and the coordination cost that implies)?
-14. **Contacts sync.** Local-first with a manual encrypted export is the phase-1
-    answer. With three devices it may not be good enough. Any sync must be
-    end-to-end encrypted under a key derived from the account key — the server
-    must never hold a readable social graph.
-15. **Minimum group size across regions.** The size-5 deanonymisation floor is
-    per group, but a cross-region group could in principle be counted
-    differently. Confirm it is just "members, wherever they are".
+13. **Do per-IP rate limits need to be shared across regions?**
+    *Recommended answer below; needs a yes.*
+
+    Every rate limit in the system is a token bucket in the memory of one box.
+    Nothing is shared between regions, because a cross-region read on the send
+    path would blow the 3 ms budget.
+
+    For most limits that is fine, and the first draft of this question
+    overstated the problem by not saying so:
+
+    * A **recipient's** limits run at the recipient's home region, which sees
+      100% of the traffic to its own handles no matter where it entered the
+      system. No multiplication.
+    * A **sender account's** limits run at that account's home region, and an
+      account has exactly one home region. No multiplication.
+
+    What *does* multiply is anything keyed to something with no home region —
+    in practice the two IP-keyed brakes: the signup bucket and the
+    login-attempt bucket. One IP can sign up in `eu-1`, `us-1` and `ap-1` at
+    once; each box sees a third of the attempts, each thinks the IP is well
+    inside its budget, and the attacker gets 3× the intended signup rate. That
+    matters because Sybil accounts are the input to every other abuse path.
+
+    Four ways to answer it:
+
+    | | Approach | Cost |
+    | --- | --- | --- |
+    | a | Static split — each region gets `global / N` | free; unfair, since a region holding 90% of users gets 1/N of the budget while the rest sits idle |
+    | b | Shared counters behind signup | correct; adds a network round-trip and a replicated store to a path that at least is not hot |
+    | c | Accept the multiplier, lean on proof-of-work | free |
+    | d | Regions gossip per-IP counts over the peer link every ~60 s | adapts fairly; more moving parts |
+
+    **Recommended: (c).** Proof-of-work does not divide. Signup costs ~1–2 s of
+    client CPU *per attempt*, so spreading across N regions costs the attacker
+    exactly N× the CPU — the bucket is a brake, PoW is the price, and only the
+    brake multiplies. Combined with the fact that the limits actually
+    protecting users do not multiply at all, the residual risk is a faster
+    account farm for an attacker who is already paying full price per account.
+
+    Revisit if the region count ever gets large enough for the multiplier to
+    matter, and then do (d) over the peer link that already exists rather than
+    (b).
 
 ## Operational
 
@@ -178,3 +200,109 @@ to turn it off is precisely the case it exists for. See [GROUPS.md](GROUPS.md).
 
 One alias per account, released after 12 months of inactivity, with a reserved
 list. See [IDENTITY.md](IDENTITY.md) and [DISCOVERY.md](DISCOVERY.md).
+
+### 11. Alias uniqueness → **a central registry**, not hashed sharding
+
+One authority serialises alias claims. Sharding the namespace by
+`hash(alias) mod regions` was the alternative; it removes the central component
+but adds moving parts to every region and makes adding a region a namespace
+migration, which is the thing worth avoiding most.
+
+The registry is acceptable because of *what it is not on*: claims are rare (one
+per account, once), it is entirely off the hot path, and sending, receiving and
+resolving all read a local replica. Its outage mode is benign — claiming a new
+alias pauses, everything else keeps working.
+
+One property worth stating because it changes the backup story: the registry is
+**reconstructible**. Every region keeps its own `aliases` rows as its own source
+of truth, so the global namespace is the union of those tables and can be
+rebuilt if the registry loses its disk. It is an authority for *serialising*
+claims, not the sole copy of the data.
+
+### 12. Where the registry runs → **a separate tiny service**
+
+Not a designated primary region. Promoting one region would make it special,
+which is what the rest of the design spends its effort avoiding, and it would
+put a foreign region's uptime in front of another region's feature.
+
+`halp-registry` is one table, three endpoints and no user-facing surface:
+
+```
+POST /registry/v1/claim    { alias, handle, owner_region } → { seq } | conflict
+POST /registry/v1/release  { alias, owner_region }         → { seq }   (tombstone)
+GET  /registry/v1/log?since={seq}                          → append-only claim log
+```
+
+Regions authenticate the user, then call the registry on their behalf; the
+registry never sees an account, a session, an end-user IP or a ping.
+
+**It is never publicly reachable.** mTLS with peer certificates only, no public
+DNS, no unauthenticated read path. A public registry read endpoint would be
+precisely the alias enumeration oracle that
+[DISCOVERY.md](DISCOVERY.md) deliberately removed, rebuilt by accident on the
+back door.
+
+The honest cost: this is the second deployable in a design that was proud of
+having one. It is small enough to run as a separate unit on the `eu-1` box
+until there is a second region — the point is that it is a separate *service*
+with its own interface, not a separate *machine*.
+
+### 14. Contacts sync → **an opaque encrypted blob the server cannot read**
+
+Answering this rather than asking it back, since it is an engineering problem
+with a standard shape.
+
+**Key derivation is the part that makes it true.** Today `POST /v1/session`
+sends the raw account key, so a key derived from it would be derivable by the
+server too, and "end-to-end encrypted" would be a lie we told ourselves. The
+account key therefore never leaves the device again; two independent values are
+derived from it client-side:
+
+```
+account_key  (16 digits, device only)
+  ├─ auth_secret   = HKDF-SHA256(account_key, info="halp/auth/v1")      → sent, Argon2id-hashed server-side
+  └─ contacts_key  = HKDF-SHA256(account_key, info="halp/contacts/v1")  → never leaves the device
+```
+
+Domain separation means a server that logs the login body learns `auth_secret`,
+which is enough to impersonate but not to decrypt. That is a modest win for
+auth on its own and the whole ballgame for contacts.
+
+**The blob.** One row per account, `contacts_blob(account_id, blob, version,
+updated_day)`, in the account's home region only — not replicated, so it does
+not become a third cross-border exception.
+
+* AES-256-GCM (stdlib) under `contacts_key`, fresh nonce per write.
+* **Padded to a 4 KiB boundary before sealing**, so the size reveals a class
+  rather than a contact count the server can watch grow.
+* Fixed ceiling `contacts.max_bytes`, default 64 KiB — invariant 8 applies to
+  this as much as to a filter. That is roughly 1,500 contacts at ~40 bytes each.
+* `GET /v1/contacts` → `{ version, blob }`; `PUT /v1/contacts` with
+  `If-Match: <version>`.
+
+**Conflicts, because three devices is the whole point.** Last-writer-wins on a
+whole blob silently eats an offline device's additions. Instead each entry is
+`{ handle, nickname, added_day, deleted }` and the merge is a set union with
+deletion winning. A stale `If-Match` is rejected, the client re-fetches, merges
+and retries, and nothing is lost. This is a CRDT in the same sense a shopping
+list is one — no library, no vector clocks.
+
+**What the server still learns, stated plainly:** that an account has a contacts
+blob, its size class, and the day it last changed. Not who is in it, not how
+many. That is the residual and it is disclosed in
+[PRIVACY.md](PRIVACY.md) rather than glossed.
+
+**Lose the account key, lose the contacts.** Consistent with there being no
+recovery anywhere else in this design.
+
+**Where the boundary is**, since "contacts" is adjacent to several non-goals: it
+is a private address book, readable only by its owner. There is no "who has me
+in their contacts", no mutual-contact notion, no suggestions — the server cannot
+read the blob, so it could not power any of that even if we forgot ourselves.
+
+### 15. Minimum group size across regions → **members, wherever they are**
+
+Confirmed. `groups.min_size` counts every member on the roster regardless of
+which region their account lives in. No mechanism is needed for this: the
+group's home region already holds the full roster, including foreign-region
+members, so the count is a local one.

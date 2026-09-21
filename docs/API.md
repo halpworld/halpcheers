@@ -20,12 +20,27 @@ the landing page.
 
 ```
 POST   /v1/accounts              → { account_key }         PoW ~1-2 s, per-IP limited
-POST   /v1/session               { account_key } → { token, expires_at }
+POST   /v1/session               { auth_secret } → { token, expires_at }
 DELETE /v1/session
 GET    /v1/account               → region, created_day, counters
 GET    /v1/account/export        → full JSON export (GDPR access/portability)
 DELETE /v1/account               → immediate, synchronous, irreversible
 ```
+
+**The account key never leaves the device.** `POST /v1/accounts` returns it once
+because the server generates it, and from that moment the client keeps it and
+sends only a derived value:
+
+```
+account_key  (16 digits, device only)
+  ├─ auth_secret   = HKDF-SHA256(account_key, info="halp/auth/v1")      → sent here, Argon2id-hashed server-side
+  └─ contacts_key  = HKDF-SHA256(account_key, info="halp/contacts/v1")  → never sent anywhere
+```
+
+`accounts.key_hash` is therefore the Argon2id hash of `auth_secret`, not of the
+account key. A server that logged every login body would learn enough to
+impersonate and nothing that decrypts a contacts blob. See
+[IDENTITY.md](IDENTITY.md) and [DISCOVERY.md](DISCOVERY.md).
 
 ### Handles and alias
 
@@ -85,6 +100,21 @@ PATCH  /v1/groups/{id}           { name?, policy? }
 DELETE /v1/groups/{id}
 ```
 
+### Contacts (phase 2)
+
+```
+GET    /v1/contacts              → { version, blob }
+PUT    /v1/contacts              { blob }   requires If-Match: <version>
+DELETE /v1/contacts
+```
+
+`blob` is AES-256-GCM under `contacts_key`, sealed on the device and padded to a
+4 KiB boundary before sealing, so its length is a size class rather than a
+contact count. The server never holds a key for it. Ceiling
+`contacts.max_bytes`, default 64 KiB; a larger body is rejected. A stale
+`If-Match` is rejected and the client re-fetches, merges (set union, deletion
+wins) and retries. See [DISCOVERY.md](DISCOVERY.md).
+
 ### Public
 
 ```
@@ -99,11 +129,29 @@ GET    /healthz  /readyz  /metrics
 ```
 POST   /peer/v1/forward          { handle, n }   already validated upstream
 GET    /peer/v1/aliases?since=   → append-only claim log for replication
-POST   /peer/v1/alias-claim      registry only: serialise a global claim
 GET    /peer/v1/groups/{id}/roster              cross-region roster read
 ```
 
 `forward` carries a handle and a count. No sender, no IP, no content.
+
+### `halp-registry` (separate service, mTLS, peer-only, never public)
+
+The alias namespace is global, so claims need one serialising authority. It is
+its own deployable rather than a designated primary region — see
+[DISCOVERY.md](DISCOVERY.md).
+
+```
+POST   /registry/v1/claim        { alias, handle, owner_region } → { seq } | conflict
+POST   /registry/v1/release      { alias, owner_region }         → { seq }   (tombstone)
+GET    /registry/v1/log?since=   → append-only claim log
+```
+
+A region authenticates the user, checks the reserved list, then claims on their
+behalf. The registry sees `(alias, handle, owner_region)` — never an account, a
+session, an end-user IP or a ping. It has **no public DNS name and no
+unauthenticated read path**: a public read endpoint here would rebuild, on the
+back door, exactly the enumeration oracle that `GET /v1/resolve/{alias}` was
+deleted to avoid.
 
 ## SQLite schema (draft)
 
@@ -113,7 +161,7 @@ WAL mode, `synchronous=NORMAL`, `foreign_keys=ON`, single writer goroutine,
 ```sql
 CREATE TABLE accounts (
   id            INTEGER PRIMARY KEY,
-  key_hash      BLOB NOT NULL UNIQUE,   -- Argon2id
+  key_hash      BLOB NOT NULL UNIQUE,   -- Argon2id of auth_secret, NOT of the account key
   region        TEXT NOT NULL,
   created_day   INTEGER NOT NULL,       -- days since epoch, NOT a timestamp
   last_seen_day INTEGER NOT NULL,
@@ -209,6 +257,16 @@ CREATE TABLE group_memberships (
   handle       TEXT NOT NULL REFERENCES handles(handle) ON DELETE CASCADE,
   joined_day   INTEGER NOT NULL,
   PRIMARY KEY (account_id, group_id, group_region)
+);
+
+-- Opaque to the server: sealed with contacts_key, which never leaves the device.
+-- Home region only; deliberately NOT replicated, so it is not a third
+-- cross-border exception. See DISCOVERY.md.
+CREATE TABLE contacts_blob (
+  account_id  INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+  blob        BLOB NOT NULL,          -- AES-256-GCM, padded to a 4 KiB boundary
+  version     INTEGER NOT NULL,       -- optimistic concurrency, matched by If-Match
+  updated_day INTEGER NOT NULL
 );
 
 -- The one deliberate exception to "no sender/recipient pairs on disk".

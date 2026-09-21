@@ -72,8 +72,12 @@ pattern, not the path.
 
 * Timestamps on disk are **day-granular integers** (`created_day`,
   `last_seen_day`), never second-precision, unless there is a stated reason.
-* The account key is only ever stored as an Argon2id hash. It must never appear
-  in a URL, QR code, log, metric or share link.
+* **The account key never leaves the device.** The client derives
+  `auth_secret = HKDF-SHA256(account_key, info="halp/auth/v1")` and sends only
+  that; the server stores its Argon2id hash. `contacts_key` is derived the same
+  way under a different `info` and is never transmitted. A change that makes the
+  server see the account key breaks every client-side encryption claim at once.
+  It must also never appear in a URL, QR code, log, metric or share link.
 * Account deletion is immediate, synchronous and complete. Handles are never
   reissued. It must also reach the two cross-region exceptions below: an alias
   tombstone into the replication log, and roster rows dropped at each group's
@@ -89,6 +93,10 @@ pattern, not the path.
   happens inside `POST /v1/ping/{target}` so probing costs the same as sending.
   Do not add a lookup, validity check, autocomplete or "is this handle real?"
   helper, however convenient it would be for the client.
+* **The alias registry is never publicly reachable.** `halp-registry` serves
+  peer regions over mTLS only: no public DNS name, no unauthenticated read path,
+  no browsable log. A public read endpoint there is the enumeration oracle above
+  rebuilt on the back door, and it would not look like one in review.
 
 ## Losses are acceptable; lying about them is not
 

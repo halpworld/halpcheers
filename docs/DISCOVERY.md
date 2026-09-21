@@ -69,20 +69,50 @@ read-only. Eventual consistency is fine: a freshly claimed alias may take
 seconds to be resolvable elsewhere, and the claiming UI says so.
 
 **Uniqueness** is the one thing that needs an authority, because two regions
-must not hand out `@kenth` simultaneously. A single **alias registry** serialises
-claims. This is acceptable because:
+must not hand out `@kenth` simultaneously. A single **alias registry**
+serialises claims. Hashed namespace sharding was the alternative and was
+rejected: it removes the central component, but it adds moving parts to every
+region and turns adding a region into a live namespace migration.
+
+The registry is acceptable because of what it is *not* on:
 
 * Claims are rare — one per account, once, ever.
 * It is off the hot path entirely. Sending, receiving, and resolving all read
   local replicas.
 * If it is down, the only thing that breaks is *claiming a new alias*.
   Degrading to a read-only namespace is a fine failure mode for a feature
-  measured in claims per minute.
+  measured in claims per minute. The claiming UI says so.
+* It is **reconstructible**. Each region keeps its own `aliases` rows as its own
+  source of truth, so the global namespace is the union of those tables. The
+  registry is an authority for *ordering* claims, not the only copy of them.
 
-Alternative if the single authority is unacceptable: shard the namespace by
-`hash(alias) mod regions` so each region owns a slice of names. Same
-resolution behaviour, no central component, more moving parts. Decide in
-[OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
+### The registry is a separate service
+
+Not a designated primary region — promoting one region would make it special,
+which is the thing the rest of this design spends its effort avoiding, and it
+would put one region's uptime in front of another region's features.
+
+`halp-registry` is one table, three endpoints, no user-facing surface:
+
+```
+POST /registry/v1/claim    { alias, handle, owner_region } → { seq } | conflict
+POST /registry/v1/release  { alias, owner_region }         → { seq }   (tombstone)
+GET  /registry/v1/log?since={seq}                          → append-only claim log
+```
+
+A region authenticates the user, checks the reserved list, then claims on their
+behalf. The registry never sees an account, a session, an end-user IP or a ping;
+it sees `(alias, handle, owner_region)` and hands back a sequence number.
+
+> **It is never publicly reachable.** mTLS with peer certificates only, no
+> public DNS, no unauthenticated read path. A public read endpoint on the
+> registry is exactly the alias enumeration oracle deleted below, rebuilt by
+> accident on the back door.
+
+The honest cost: a second deployable, in a design that was proud of having one.
+It is small enough to run as its own unit on the `eu-1` box until a second
+region exists — the point is that it is a separate *service* with its own
+interface, not a separate *machine*.
 
 ### Resolution is folded into sending
 
@@ -103,13 +133,20 @@ the correct trade for a guessable public namespace, and it is the same uniform
 
 ### Abuse note specific to going global
 
-Rate-limit state is per-region and in memory. A scraper can therefore spread
-alias attempts across N regions and get N times their intended budget. With a
-handful of regions the multiplier is small, but the alias-path budget should be
-set to roughly `intended_global / region_count` rather than the full amount, and
-the per-target escalation in [ABUSE.md](ABUSE.md) still applies at the owning
-region, which sees all of the traffic for its own aliases regardless of where it
-entered. Tracked as an open question.
+Rate-limit state is per-region and in memory, which raises the obvious question
+of whether an attacker gets N× their budget by spreading across N regions. For
+the limits that protect users, no:
+
+* A **sender account's** budget lives at that account's home region, and an
+  account has exactly one home region.
+* An **alias's** and a **handle's** inbound budgets live at the owner's region,
+  which sees all of the traffic for its own targets regardless of where it
+  entered the system. The per-target PoW escalation in [ABUSE.md](ABUSE.md)
+  applies there too.
+
+What does multiply is the IP-keyed brakes on signup and login, which is a
+different problem with a different answer — see question 13 in
+[OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
 
 ## 2. Groups across regions
 
@@ -121,6 +158,9 @@ A group lives in one region; its members do not have to.
   carries the member's prefix and self-routes like any other handle.
 * Roster reads are a cross-region read of a small, cacheable list.
 * Pinging a teammate uses their group handle — no directory involved.
+* The `groups.min_size` deanonymisation floor counts **members, wherever they
+  are**. No mechanism is needed for that: the group's home region already holds
+  the full roster including foreign-region members, so the count is local.
 
 **The honest caveat:** joining a group hosted elsewhere means your display name
 and your group handle are stored in that region. That is real, it is
@@ -133,18 +173,63 @@ region" rather than "your data never leaves".
 ## 3. Contacts
 
 For the actual "appreciate my friend in Hong Kong again next week" case, a
-directory is overkill. A local contacts list solves it with zero server cost and
-zero privacy surface:
+directory is overkill. A contacts list solves it:
 
-* Nickname → handle, stored **on the device**, never on the server.
+* Nickname → handle, held **on the device**.
 * Populated by tapping a link, scanning a QR, or from a group roster.
-* Encrypted export/import file so a user can move it between their own devices.
 
-Server-side sync would mean storing a social graph, which is the one dataset
-this product has so far avoided entirely. Local-first, with a manual export, is
-the phase-1 answer. Whether that is good enough with three devices is an open
-question — but any sync design must be end-to-end encrypted with a key derived
-from the account key, so the server holds an opaque blob and never the graph.
+Phase 1 is local-only with an encrypted export file. That stops being good
+enough the moment someone has the web app and the desktop app, which is now
+phase 1, so sync follows in phase 2 — as a blob the server stores and cannot
+read.
+
+### Key derivation, which is the part that makes it true
+
+A key derived from the account key is worthless if the server ever sees the
+account key, and today `POST /v1/session` sends it. So the account key stops
+leaving the device, and two independent values are derived from it client-side:
+
+```
+account_key  (16 digits, device only)
+  ├─ auth_secret   = HKDF-SHA256(account_key, info="halp/auth/v1")      → sent, Argon2id-hashed server-side
+  └─ contacts_key  = HKDF-SHA256(account_key, info="halp/contacts/v1")  → never leaves the device
+```
+
+Domain separation means a server that logged every login body would learn
+`auth_secret` — enough to impersonate, useless for decryption. Modest for auth
+on its own; the whole point for contacts.
+
+### The blob
+
+One row per account, in the account's home region only. Not replicated, so it
+does not become a third cross-border exception.
+
+* AES-256-GCM under `contacts_key`, fresh nonce per write.
+* **Padded to a 4 KiB boundary before sealing**, so size reveals a class rather
+  than a contact count the server could watch grow.
+* Fixed ceiling `contacts.max_bytes`, default 64 KiB — invariant 8 covers this
+  as much as it covers a Bloom filter. ~1,500 contacts at ~40 bytes each.
+* `GET /v1/contacts` → `{ version, blob }`, `PUT /v1/contacts` with
+  `If-Match: <version>`.
+
+**Conflicts matter here**, because three devices is the entire reason the
+feature exists. Last-writer-wins on a whole blob silently eats an offline
+device's additions. Instead each entry is
+`{ handle, nickname, added_day, deleted }`, and merging is a set union where
+deletion wins. A stale `If-Match` is rejected; the client re-fetches, merges,
+retries. No library, no vector clocks, nothing lost.
+
+**What the server still learns:** that an account has a contacts blob, its size
+class, and the day it last changed. Not who is in it, not how many. Disclosed in
+[PRIVACY.md](PRIVACY.md) rather than glossed over.
+
+**Lose the account key, lose the contacts** — consistent with there being no
+recovery anywhere else here.
+
+This stays an address book and does not drift toward the non-goals: it is
+readable only by its owner, there is no "who has me in their contacts", no
+mutual-contact notion and no suggestions. The server cannot read the blob, so it
+could not power any of that even if we forgot ourselves.
 
 ## Summary of what is and is not global
 
@@ -155,5 +240,5 @@ from the account key, so the server holds an opaque blob and never the graph.
 | Account key hash, settings, subscriptions, blocks, counters | home region only |
 | Group record + roster | group's home region |
 | Group membership (member's side) | member's home region |
-| Contacts | the user's device |
+| Contacts | the user's device, plus an opaque blob in the home region the server cannot read |
 | Pings | nowhere — same as always |

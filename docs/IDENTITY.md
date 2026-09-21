@@ -18,9 +18,24 @@ login credential and the only proof that the account is yours. It is generated
 client-side-visible at signup and shown once, with a copy button and a "write
 this down" wall the user must acknowledge.
 
-* Stored server-side only as an Argon2id hash. We cannot recover it, print it,
-  or reset it. Losing it loses the account — say so in plain language at signup,
-  at every login, and in the settings screen.
+* **It never leaves the device.** The client derives two independent values from
+  it and sends only the first:
+
+  ```
+  account_key  (16 digits, device only)
+    ├─ auth_secret   = HKDF-SHA256(account_key, info="halp/auth/v1")      → sent at login, Argon2id-hashed server-side
+    └─ contacts_key  = HKDF-SHA256(account_key, info="halp/contacts/v1")  → never leaves the device
+  ```
+
+  Domain separation is what makes "the server cannot read your contacts" true
+  rather than aspirational: a server that logged every login body would learn
+  `auth_secret`, which is enough to impersonate and useless for decryption. The
+  first draft sent the raw account key to `POST /v1/session`; that would have
+  made every derived key derivable server-side. See
+  [DISCOVERY.md](DISCOVERY.md).
+* Stored server-side only as an Argon2id hash of `auth_secret`. We cannot
+  recover it, print it, or reset it. Losing it loses the account — say so in
+  plain language at signup, at every login, and in the settings screen.
 * Never appears in a URL, a QR code, a share link, a log line or a metric label.
 * Logging in with it is rate-limited hard and costs proof-of-work on every
   attempt. 16 digits is ~53 bits, which is ample offline but thin against a
@@ -88,10 +103,13 @@ try `@john`. Therefore:
   with no activity for 12 months is released.
 * One alias per account. Revisit if there is demand.
 
-The three rules above are settled
-([decision 10](OPEN-QUESTIONS.md#decided)); how the global namespace stays
-unique across regions is not — see [DISCOVERY.md](DISCOVERY.md) and open
-questions 11 and 12.
+The rules above are settled ([decision 10](OPEN-QUESTIONS.md#decided)), and so
+is how the global namespace stays unique across regions: a single **central
+registry** serialises claims, running as its own small service rather than as a
+promoted primary region ([decisions 11 and 12](OPEN-QUESTIONS.md#decided)). It
+is peer-only over mTLS, with no public read path, because a public lookup there
+would be the enumeration oracle we deleted above. See
+[DISCOVERY.md](DISCOVERY.md).
 
 ## Regions
 

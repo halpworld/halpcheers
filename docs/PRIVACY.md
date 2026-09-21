@@ -27,6 +27,7 @@ Everything the service stores, and why.
 | Push subscriptions (endpoint URL, p256dh, auth) | SQLite | until pruned / 180 d idle | contract |
 | Delivery settings | SQLite | life of account | contract |
 | Group membership + display name | SQLite | until leave/removal | contract |
+| Contacts blob (opaque ciphertext, size class, `updated_day`) | SQLite, **home region only** | life of account | contract — client-encrypted, unreadable to us |
 | Blocks `(sender, handle, created_day)` | SQLite | 12 months | legitimate interest — safety |
 | Lifetime received counter | SQLite | life of account | contract — aggregate integer, not exposed publicly in phase 1 |
 | Rate-limit buckets, Bloom bits, sketches | memory only | minutes to 48 h | legitimate interest — security |
@@ -35,6 +36,16 @@ Everything the service stores, and why.
 **Not stored, anywhere, ever:** pings, sender↔recipient pairs (except a
 user-initiated block), message content, IP addresses at rest, user agents,
 access-log path parameters, precise account timestamps.
+
+**The contacts blob is worth being precise about**, because "we can't read it"
+is a claim that has to survive scrutiny. The account key never leaves the
+device; the client derives `auth_secret` for login and `contacts_key` for
+encryption by HKDF domain separation, and only the first is ever sent. The blob
+is AES-256-GCM under `contacts_key` and padded to a 4 KiB boundary before
+sealing. What we do learn: that an account has one, which size class it falls
+in, and the day it last changed. Not who is in it, and not how many. It is
+stored in the home region only and is deliberately not replicated, so it does
+not become a third cross-border exception.
 
 **Timestamps are day-granular** (`created_day`, `last_seen_day` as integer days)
 rather than second-precision. Second-precision timestamps across a handful of
@@ -51,8 +62,14 @@ subscriptions, settings, blocks, counters — stays in the home region.
    strangers, so replicating `alias → handle` discloses nothing the user has
    not deliberately published. It is opt-in, and the opt-in is the consent
    point: say at claim time that the alias becomes visible in every region.
-   Claiming is also the only write that touches a central registry; nothing
+   Claiming is also the only write that touches the central registry; nothing
    else does.
+
+   **`halp-registry` is a processor in the chain** and belongs in the record of
+   processing activities. It handles `(alias, handle, owner_region)` — opt-in,
+   public-by-nature data — and never sees an account, a session, an end-user IP
+   or a ping. It is reachable only by peer regions over mTLS, with no public
+   DNS name and no unauthenticated read path.
 2. **Joining a group hosted in another region** stores your display name, note
    and group-scoped handle there. Disclosed at the join screen, deleted on
    leave or removal, and mirrored by a local `group_memberships` row so that
@@ -94,8 +111,8 @@ unusual:
 * **Access / portability** — one button in the client exports the account's
   complete row set as JSON. It is small enough to render on screen.
 * **Erasure** — one button. Deletes the account, all handles, alias,
-  subscriptions, settings, group memberships and blocks, immediately and
-  synchronously. Nothing to anonymise because there is nothing pseudonymous
+  subscriptions, settings, group memberships, the contacts blob and blocks,
+  immediately and synchronously. Nothing to anonymise because there is nothing pseudonymous
   left behind. Handles are never reissued.
 * **Erasure reaches the two cross-border exceptions too**, and must be
   verifiable: deleting an account writes an alias tombstone into the
@@ -116,9 +133,10 @@ unusual:
 ## Multi-region
 
 **Regional independence, not replication.** Each region is a standalone
-deployment with its own SQLite file. No user data is replicated across borders
-at rest, so adding a US or APAC region does not create a transfer of EU user
-data.
+deployment with its own SQLite file. Apart from the opt-in alias directory and
+foreign-region group roster rows above, no user data is replicated across
+borders at rest, so adding a US or APAC region does not create a transfer of EU
+user data.
 
 Cross-region pings carry a handle and nothing else — no sender, no IP, no
 content — forwarded over mTLS to the owning region. That payload contains no
@@ -138,7 +156,8 @@ at your own handle.
   of how benign the message is. Get an opinion.
 * **Breach posture.** Worst-case compromise leaks handles and push endpoints —
   bad, but no content, no history, no contact details, and no social graph
-  beyond group rosters. Document that in the incident plan; it is genuinely
+  beyond group rosters. Contacts blobs would leak as ciphertext we hold no key
+  for. Document that in the incident plan; it is genuinely
   reassuring and worth being able to say quickly.
 * **Transparency report.** Trivial to produce and good for trust: we have no
   ping data to hand over, and we can say so with numbers.
