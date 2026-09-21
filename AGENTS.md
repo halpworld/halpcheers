@@ -113,6 +113,13 @@ infrastructure that only makes sense as a step toward them: messages, replies,
 text, images, reactions, profiles, avatars, followers, feeds, leaderboards,
 read receipts, sender reveal, ads, third-party analytics SDKs.
 
+## Working in parallel
+
+Phase 1 is built by several agents at once. Before your first commit, read
+[docs/AGENT-WORKFLOW.md](docs/AGENT-WORKFLOW.md): it says which directories your
+track owns, which files are frozen, and how to log a decision. Anything a human
+looks at — copy included — is specified in [docs/UI.md](docs/UI.md).
+
 ## Before you change the spec
 
 `docs/` is the source of truth. If an implementation needs to violate something

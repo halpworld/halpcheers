@@ -223,13 +223,18 @@ halp/
 ├── server/                  # Go backend — the only thing that must be deployed
 │   ├── cmd/halpd/           # main
 │   ├── internal/
-│   │   ├── http/            # chi routes, handlers, middleware
-│   │   ├── auth/            # account keys, sessions, proof-of-work
-│   │   ├── guard/           # token buckets, bloom dedupe, anomaly detection
-│   │   ├── coalesce/        # accumulator + time wheel
+│   │   ├── core/            # shared types + the interfaces tracks implement — frozen
+│   │   ├── config/          # TOML load, startup-only vs SIGHUP split
+│   │   ├── http/            # router.go (written once) + one file per endpoint group
+│   │   ├── auth/            # account keys, sessions, Argon2id
+│   │   │   └── pow/         # hashcash challenges, verify, adaptive difficulty
+│   │   ├── guard/           # token buckets, bloom cascade, sketch, anomaly detection
+│   │   ├── coalesce/        # bounded queue, accumulator + time wheel
 │   │   ├── push/            # RFC 8291 Web Push (stdlib crypto, no deps)
 │   │   ├── stream/          # SSE hub
 │   │   ├── store/           # SQLite, hand-written SQL, no ORM
+│   │   │   └── migrations/  # plain .sql, applied in order
+│   │   ├── obs/             # Prometheus registry + access log middleware
 │   │   └── region/          # handle prefix minting + validation (no routing yet)
 │   ├── go.mod
 │   └── Dockerfile
@@ -242,6 +247,12 @@ halp/
 ├── docker-compose.yml
 └── AGENTS.md
 ```
+
+These package boundaries are also the **work boundaries**: phase 1 is built by
+several agents in parallel and each track owns whole directories from this tree.
+`core/`, `config/`, `http/router.go` and `store/migrations/0001_init.sql` are
+written first, together, and then frozen, because they are what everything else
+compiles against. See [AGENT-WORKFLOW.md](AGENT-WORKFLOW.md).
 
 ### One deployable
 
@@ -257,7 +268,7 @@ this region's `aliases` table. Keeping it out is worth more than the design was:
 a second deployable in a project whose pitch is "one binary and a SQLite file"
 is a real cost.
 
-## Dependency policy## Dependency policy
+## Dependency policy
 
 Go server: stdlib plus `chi`, `modernc.org/sqlite` or `mattn/go-sqlite3`, and a
 Prometheus client. Web Push encryption is implemented in-house against

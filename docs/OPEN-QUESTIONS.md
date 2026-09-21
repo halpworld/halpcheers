@@ -332,3 +332,82 @@ same reason.
 reintroduces transfers, cross-border erasure and the disclosures above. The
 design is parked in [DISCOVERY.md](DISCOVERY.md) precisely so the cost is
 visible before anyone commits to it.
+
+### 23. How Phase 1 is split for parallel agents → **module ownership, behind a frozen contract wave**
+
+Phase 1 is built by several agents working at once. The naive split — one agent
+per feature, everyone editing whatever the feature touches — produces constant
+conflicts in exactly the files that matter most (the router, the schema, the
+config struct) and an integration phase longer than the build.
+
+So the work is cut along the package boundaries in
+[ARCHITECTURE.md](ARCHITECTURE.md): **one agent owns whole directories**, and the
+four things everyone compiles against are written first, together, by one
+foundation track, and then frozen:
+
+* `server/internal/core/` — shared types and the small interfaces the tracks
+  implement for each other.
+* `server/internal/http/router.go` — every phase-1 route mounted to a
+  `notImplemented` stub. Feature tracks replace their stub in their own
+  `http/<group>.go` file and never touch the router again.
+* `server/internal/store/migrations/0001_init.sql` — the entire phase-1 schema
+  in one file, so nobody races to claim `0002`.
+* `server/internal/config/` — the whole tunables table, including keys whose
+  consumer does not exist yet.
+
+The cost is a serialisation point: nothing parallel starts until those land, and
+a change to `core/` afterwards is a PR of its own that names every track it
+breaks. That is the right trade. The alternative — letting each track add its
+own types and routes as it goes — is cheaper for a week and then produces a
+system nobody can assemble.
+
+Two packages were added to the documented layout for this:
+`internal/config/` and `internal/obs/`, which existed implicitly (the tunables
+table and the observability rules) but had no home. `internal/auth/pow/` is a
+subpackage so that proof-of-work and account handling can be built in parallel
+without sharing a directory.
+
+The breakdown, the dependency order and the rules are written down in
+[AGENT-WORKFLOW.md](AGENT-WORKFLOW.md) and tracked as GitHub issues.
+
+### 24. Where UI and UX decisions live → **one shared [UI.md](UI.md), copy included**
+
+There was no UI document, which meant four client tracks — web, extension,
+desktop, and the server-rendered public pages — would each have invented their
+own copy, their own error states and their own idea of what happens after you
+press the button.
+
+That is worse here than in a normal product, because several of those choices
+*are* privacy properties. A client that shows "you've already appreciated this
+person today" rebuilds the enumeration oracle in the UI. A client that shows a
+different spinner for a rate-limited send leaks enforcement state and breaks
+invariant 7. A client that lists pings implies a ping log exists. None of those
+look like invariant violations while you are writing them.
+
+So [UI.md](UI.md) is a specification, not a style guide: it carries the exact
+copy for the key wall, the login failure, the burn dialog and the abuse
+confirmation; the two-state send button; the fixed 300 ms latency floor that
+makes an unknown handle and a delivered ping look identical; and a checklist of
+what no screen may ever show. Agents implement it rather than deciding it.
+
+The cost is that UI changes now need a doc change. Given that "the send button
+has exactly two states" is load-bearing for the product's central claim, that is
+the correct amount of friction.
+
+### 25. Where agents log decisions → **this file, numbered, and nowhere else**
+
+Candidates were an `adr/` directory, decision records in PR descriptions, and
+keeping the existing `## Decided` section. The existing section wins because it
+already holds twenty-two entries with their reasoning attached, and a second
+location immediately makes the first one untrustworthy — the question stops
+being "what did we decide?" and becomes "where did we decide it?".
+
+The mechanics: an agent appends a numbered entry **in the same PR as the code**,
+claiming its number by commenting on the Phase 1 tracker issue first. First
+comment wins, the loser renumbers on rebase. Entries are never deleted; a
+superseded decision gets a follow-up that says so.
+
+The known weakness is the shared file: a dozen agents appending to the end of
+one Markdown file will produce merge conflicts. They are trivial ones — two
+additions at the end of a file — and the number claim keeps them from silently
+colliding. That is cheaper than losing the single-source property.

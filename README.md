@@ -14,7 +14,9 @@ reason, no sender identity. One fixed idea, delivered.
 
 ## Status
 
-Design phase. No code yet. The full plan lives in [`docs/`](docs/).
+Design phase. No code yet. The full plan lives in [`docs/`](docs/), and
+Phase 1 is broken into parallel tracks in the issue tracker — see
+[docs/AGENT-WORKFLOW.md](docs/AGENT-WORKFLOW.md).
 
 | Doc | What's in it |
 | --- | --- |
@@ -27,7 +29,9 @@ Design phase. No code yet. The full plan lives in [`docs/`](docs/).
 | [docs/SHARING.md](docs/SHARING.md) | Links, QR, badges, live-stream overlays |
 | [docs/PRIVACY.md](docs/PRIVACY.md) | GDPR posture and data inventory |
 | [docs/API.md](docs/API.md) | HTTP surface and SQLite schema |
+| [docs/UI.md](docs/UI.md) | UI and UX spec — copy, states, what no screen may show |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Phasing and milestones |
+| [docs/AGENT-WORKFLOW.md](docs/AGENT-WORKFLOW.md) | How parallel agents split the work and log decisions |
 | [docs/OPEN-QUESTIONS.md](docs/OPEN-QUESTIONS.md) | Decisions made, and the ones still outstanding |
 
 Engineering rules that must not be violated are in [AGENTS.md](AGENTS.md).
