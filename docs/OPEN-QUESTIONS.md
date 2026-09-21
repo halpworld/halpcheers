@@ -431,3 +431,10 @@ multi-threaded write contention entirely), while the hot path serves reads from 
 in-process LRU cache and the operating system page cache. The operational stability
 of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
+
+### 37. Settings boundaries and abuse reporting semantics → **bounded validation, idempotent blocks, uniform 200 response**
+
+Decided: Settings updates via `PUT /v1/settings` strictly enforce config boundaries (`digest_window_s` [0, 86400], `max_per_hour` [1, 60], `min_count` [1, 1000], `quiet_start`/`quiet_end` [0, 23], valid IANA timezone `tz`, and mode `all`|`groups_only`|`paused`). Out-of-range inputs are rejected with 400 Bad Request rather than silently clamped. Quiet hours and timezones are evaluated as user preferences, not stored timestamps.
+
+Abuse reporting via `POST /v1/handles/{handle}/report-abuse` resolves the top sender from the in-memory Count-Min sketch for the handle (if owned by the calling session) and writes a single `(sender_account_id, handle, created_day)` row into `blocks`. The endpoint returns an identical 200 OK `{"status":"ok"}\n` response regardless of whether the handle exists, is owned by another account, has no recorded traffic, or successfully blocks a sender (invariants 6 and 7). Blocks are pruned after 365 days by `SweepExpiredBlocks`.
+
