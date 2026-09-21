@@ -431,3 +431,18 @@ multi-threaded write contention entirely), while the hot path serves reads from 
 in-process LRU cache and the operating system page cache. The operational stability
 of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
+
+### 30. Handle encoding and resolver LRU cache → **Crockford base32 with 'e' prefix, 60-bit entropy, bounded in-process LRU**
+
+Decided: handles are minted as 13 characters: a fixed region prefix (`e` for `eu-1`)
+followed by 12 characters of lowercase Crockford base32 (`0123456789abcdefghjkmnpqrstvwxyz`,
+excluding `i`, `l`, `o`, `u`). Each character encodes 5 bits, providing 60 bits of
+entropy drawn from `crypto/rand`.
+
+Handle and alias resolution on the ingress path is backed by an in-process thread-safe
+LRU cache (`*region.Resolver`) sized from `config.ResolverCacheSize` (default 100,000 items,
+~16 MB memory footprint). Cache misses fall back to SQLite read queries (`handles` and `aliases`
+tables). When a handle is updated or burned (moved into `burns` table), the resolver LRU
+entry is invalidated immediately. In accordance with invariant 8, the cache uses fixed
+memory bounds and cannot be bloated by arbitrary attacker inputs.
+
