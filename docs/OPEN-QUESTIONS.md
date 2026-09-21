@@ -431,3 +431,13 @@ multi-threaded write contention entirely), while the hot path serves reads from 
 in-process LRU cache and the operating system page cache. The operational stability
 of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
+
+### 36. SSE hub connection memory ceiling and idle demotion → **4.5 KB/conn measured footprint, 25 s heartbeats, 15 m idle demotion**
+
+Decided: the Server-Sent Events hub (`internal/stream`) manages real-time streaming connections over `GET /v1/stream` with strict fixed-capacity per-connection channel buffers (16 frames) and an overall ceiling of 10,000 connections. Heartbeats (`event: ka`) are emitted every 25 seconds. Connections without incoming appreciation activity are demoted after `idle.demote_after` (default 15 minutes), gracefully terminating the stream with an `event: demote` message and directing clients to poll `GET /v1/pending`.
+
+Reasoning:
+1. In accordance with AGENTS.md Invariant 8, all per-connection allocations are bounded. Slow consumers who fail to read frames cause their 16-element buffer to fill, immediately triggering connection termination rather than allowing per-connection buffers to expand unboundedly.
+2. In accordance with the capacity budget in docs/ARCHITECTURE.md (12–20 KB/conn), measurements with 1,000 active connections demonstrate a heap footprint of ~4.56 KB per connection, ensuring 10,000 concurrent desktop/web clients consume less than 50 MB of RAM.
+3. Idle demotion to `GET /v1/pending` prevents inactive browser tabs from indefinitely exhausting connection limits while ensuring pings are never missed.
+
