@@ -431,3 +431,13 @@ multi-threaded write contention entirely), while the hot path serves reads from 
 in-process LRU cache and the operating system page cache. The operational stability
 of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
+
+### 32. Ingress bounded queue and drop policy → **non-blocking channel send (~100 ns), return 202 on queue-full drops**
+
+Decided: `POST /v1/ping/{target}` enqueues `core.PingJob` into a bounded in-memory Go channel (`coalesce.Queue`) using a non-blocking `select`. When the queue reaches its fixed capacity limit (default 65,536 jobs, sized from startup config `queue_size`), the incoming job is dropped immediately, the metric `halp_pings_dropped_total{reason="queue_full"}` is incremented, and the handler returns `202 Accepted` with an empty body in under 3 ms.
+
+Reasoning:
+1. In accordance with AGENTS.md Invariant 2, the HTTP handler must complete in under 3 ms and never await a push service, disk write, or DNS lookup. Blocking on channel send when workers are saturated would violate the latency ceiling and cascade upstream into HTTP connection timeouts.
+2. In accordance with AGENTS.md Invariant 7 ("Enforcement is invisible to the sender"), returning `429 Too Many Requests` or an error would signal system overload and invite retry amplification from well-behaved clients or give attackers feedback on queue depth.
+3. Best-effort delivery is an explicit design choice ("Losses are acceptable; lying about them is not"). Drops under load are counted via Prometheus metrics rather than masked by un-bounded buffers or blocking retries.
+
