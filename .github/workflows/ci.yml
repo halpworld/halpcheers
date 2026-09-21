@@ -39,3 +39,6 @@ jobs:
 
       - name: Go Test with Race Detector
         run: go test -race ./...
+
+      - name: Invariant 9 Check (No Identifier Leaks)
+        run: go run ./cmd/check-invariant9 .
