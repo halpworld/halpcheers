@@ -479,3 +479,9 @@ Reasoning:
 2. In accordance with AGENTS.md Invariant 7 ("Enforcement is invisible to the sender"), returning `429 Too Many Requests` or an error would signal system overload and invite retry amplification from well-behaved clients or give attackers feedback on queue depth.
 3. Best-effort delivery is an explicit design choice ("Losses are acceptable; lying about them is not"). Drops under load are counted via Prometheus metrics rather than masked by un-bounded buffers or blocking retries.
 
+### 33. Coalesce accumulator eviction and memory bounds → **in-memory counter map bounded by fixed capacity, stale jobs discarded on ingestion**
+
+Decided: the coalesce accumulator (`server/internal/coalesce/`) aggregates incoming appreciation pings purely as an in-memory map keyed by recipient `core.AccountID` to an accumulator entry containing only a count $N$ and first/last seen timestamps. In accordance with Invariant 1, the entry contains no sender fields, handles, or message records.
+
+Stale jobs older than `dispatch.max_age` (30 s) are dropped on ingress and counted as `obs.DropReasonStale`. The accumulator has a fixed capacity bound (`max_recipients`, default 100,000) satisfying Invariant 8. Expired entries are extracted by the flush loop into `core.Digest` structs carrying only recipient ID and count $N$. The `/v1/pending` endpoint atomically clears and returns the pending count for cold-start and reconnection synchronization.
+
