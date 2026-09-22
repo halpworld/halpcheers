@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Halp</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <div class="brand">halp</div>
+  </div>
+
+  <div id="arrival-count" class="arrival-box">
+    Loading arrivals...
+  </div>
+
+  <form id="send-form" class="form-group">
+    <input type="text" id="target-input" placeholder="Paste handle or alias" required>
+    <button type="submit" id="send-btn" class="btn">Appreciate them</button>
+  </form>
+
+  <div class="saved-handles">
+    <div class="saved-title">Quick Send</div>
+    <div id="saved-list"></div>
+  </div>
+
+  <div class="footer">
+    <a href="https://halp.to" target="_blank" rel="noreferrer">Open web app</a>
+  </div>
+
+  <div id="status" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0);" aria-live="polite"></div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Halp — Anonymous Appreciation",
+  "version": "0.1.0",
+  "description": "Send an anonymous appreciation ping in one click.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://halp.to/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Halp"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "extension@halp.to",
+      "strict_min_version": "109.0"
+    }
+  }
+}
