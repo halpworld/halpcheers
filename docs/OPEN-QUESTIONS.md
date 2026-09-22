@@ -493,3 +493,14 @@ To satisfy the dispatch worker pool CPU budget, the ECDH shared secret between t
 
 Crucially, the 16-byte salt is generated afresh from `crypto/rand` for every single message, strictly preventing AES-GCM nonce reuse under the same CEK. Plaintext pings without count are sent payloadless (zero-byte body, omitting `Content-Encoding`), minimizing bandwidth and processing overhead.
 
+### 35. Dispatch token lifecycle and mid-flight re-registration pruning guard → **Authoritative prune only on 404/410 where created_day <= send_start_day**
+
+Decided: Web Push subscriptions are pruned exclusively upon authoritative rejection (`404 Not Found` or `410 Gone`). The deletion query is strictly scoped as:
+`DELETE FROM subscriptions WHERE endpoint = ? AND created_day <= ?`
+where the timestamp bound is `send_start_day` captured immediately before the HTTP dispatch request is dispatched over the network.
+
+Reasoning:
+1. In accordance with AGENTS.md Invariant 4, transient errors (`429`, `500`, `502`, `503`, timeouts, or network/DNS drops) must never trigger subscription deletion. Pruning on transient faults would silently cause users to stop receiving pings without notification.
+2. In-flight race conditions: if a client device unregisters and re-registers the same endpoint while a push dispatch request is in flight, the re-registered row has a newer `created_day`. Requiring `created_day <= send_start_day` ensures that the newly created row is preserved when the prior send's 410 response returns.
+3. No retries or outbound queues: failed push attempts are dropped immediately and counted in metrics, preserving the best-effort delivery contract.
+
