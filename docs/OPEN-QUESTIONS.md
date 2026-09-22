@@ -519,3 +519,7 @@ Decided: Settings updates via `PUT /v1/settings` strictly enforce config boundar
 
 Abuse reporting via `POST /v1/handles/{handle}/report-abuse` resolves the top sender from the in-memory Count-Min sketch for the handle (if owned by the calling session) and writes a single `(sender_account_id, handle, created_day)` row into `blocks`. The endpoint returns an identical 200 OK `{"status":"ok"}\n` response regardless of whether the handle exists, is owned by another account, has no recorded traffic, or successfully blocks a sender (invariants 6 and 7). Blocks are pruned after 365 days by `SweepExpiredBlocks`.
 
+### 38. Public landing pages and SVG badge semantics → **byte-identical responses, no-JS fallback, 300 ms perceived latency floor**
+
+Decided: Public endpoints `GET /h/{handle}` and `GET /@{alias}` serve byte-identical HTML and response headers across existing, nonexistent, paused, and blocked handles (invariant 7: no existence or timing oracle). The page is fully functional without JavaScript via a standard HTML form POST that transitions to a terminal "Sent." state. When JavaScript is present, client-side progressive enhancement holds a 300 ms perceived-latency floor before transitioning the button to "Sent." so that fast drops and accepted pings are indistinguishable to a human observer. The SVG badge at `GET /badge/{handle}.svg` renders a plain static "appreciate me" badge with no counter (decision 8) and immutable long-lived caching.
+
