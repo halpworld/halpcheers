@@ -432,6 +432,78 @@ in-process LRU cache and the operating system page cache. The operational stabil
 of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
 
+### 28. PoW difficulty calibration and clock skew tolerance → **d=14 floor, d=21 signup, ±1 epoch skew tolerance**
+
+Decided: the default global floor `pow.floor_ms = 10` corresponds to $d=14$ leading zero bits ($2^{14} = 16,384$ hashes, ~10 ms client compute). Signup `pow.signup_ms = 1500` maps to $d=21$ leading zero bits ($2^{21} = 2,097,152$ hashes, ~1.4–1.5 s client compute).
+
+Tolerance for clock skew on challenge epochs is set to $\pm 1$ adjacent epoch ($\pm 5$ minutes around the active epoch). Tokens for epochs older than `cur - 1` or future epochs beyond `cur + 1` are authoritatively rejected as expired. This accounts for reasonable client device clock drift without opening a precomputation window wider than 10 minutes. Challenges are derived deterministically via HMAC-SHA256 from a server-seeded rotating secret. Hot-path verification uses a stack-allocated buffer and `sha256.Sum256` achieving zero heap allocations and ~130 ns execution time, well inside the 2 µs request path budget.
+
+### 29. Argon2id parameters and deterministic salt for auth_secret → **Argon2id (t=1, m=64 MiB, p=4) with deterministic salt**
+
+Decided: `accounts.key_hash` is computed as `Argon2id(auth_secret, salt="halp-argon2id-v1", t=1, m=64 MiB, p=4, keyLen=32)`.
+
+Reasoning:
+1. `auth_secret` is derived client-side via HKDF-SHA256 from the 16-digit cryptographically random account key (~53.15 bits entropy). The client submits only `auth_secret` to `POST /v1/session` without any public username or account identifier.
+2. Because there is no public account identifier submitted with login, account lookup requires querying `SELECT id FROM accounts WHERE key_hash = ?`. To support O(1) indexed lookup without iterating through every account in the database on every login attempt, the Argon2id hash must be deterministic for a given `auth_secret`.
+3. A fixed 16-byte domain salt (`"halp-argon2id-v1"`) combined with 64 MiB RAM and 4 threads satisfies RFC 9106 recommended parameters. Rainbow tables are impossible because the input possesses over 53 bits of high-entropy cryptographic randomness from `crypto/rand`. The 64 MiB memory hardness makes offline ASIC/GPU dictionary cracking prohibitively expensive.
+4. On the login endpoint, timing uniformity (AGENTS.md Invariant 7) is strictly preserved: rate-limited attempts and malformed inputs compute a dummy Argon2id hash with the identical parameters before returning, ensuring an attacker cannot distinguish between a non-existent account, bad credentials, and a tripped rate limiter by measuring response latency.
+
+### 30. Handle encoding and resolver LRU cache → **Crockford base32 with 'e' prefix, 60-bit entropy, bounded in-process LRU**
+
+Decided: handles are minted as 13 characters: a fixed region prefix (`e` for `eu-1`)
+followed by 12 characters of lowercase Crockford base32 (`0123456789abcdefghjkmnpqrstvwxyz`,
+excluding `i`, `l`, `o`, `u`). Each character encodes 5 bits, providing 60 bits of
+entropy drawn from `crypto/rand`.
+
+Handle and alias resolution on the ingress path is backed by an in-process thread-safe
+LRU cache (`*region.Resolver`) sized from `config.ResolverCacheSize` (default 100,000 items,
+~16 MB memory footprint). Cache misses fall back to SQLite read queries (`handles` and `aliases`
+tables). When a handle is updated or burned (moved into `burns` table), the resolver LRU
+entry is invalidated immediately. In accordance with invariant 8, the cache uses fixed
+memory bounds and cannot be bloated by arbitrary attacker inputs.
+
+### 31. Pair-limit cascaded Bloom filters and count-min sketch dimensions → **cascaded slots with 1 MiB minimum floor, 4x2048 count-min sketch**
+
+Decided: the pair deduplication limit (`server/internal/guard/`) is enforced using a cascade of Bloom filters per 24-hour window, rotated across today and yesterday. Each slot is allocated with a hard 1 MiB floor (`guard.pair.slot_bytes = 1048576`), yielding a false positive probability $< 10^{-6}$ for typical daily ping volumes.
+
+In accordance with `docs/ABUSE.md` § Layer 1, Bloom filter lookup is directional: when an element collides (false positive), the evaluation advances to the next slot. Consequently, a false positive can only ever cost an honest sender quota, never grant an extra ping to an attacker.
+
+Abuse top-sender tracking (Layer 3) utilizes an in-memory Count-Min Sketch sized at depth $d=4$ and width $w=2048$, providing bounded-error frequency estimation with fixed memory footprint (~32 KiB). On explicit `report-abuse`, the top sender is written to the persistent `blocks` table, which is the sole durable record exception under Invariant 1.
+
+### 32. Ingress bounded queue and drop policy → **non-blocking channel send (~100 ns), return 202 on queue-full drops**
+
+Decided: `POST /v1/ping/{target}` enqueues `core.PingJob` into a bounded in-memory Go channel (`coalesce.Queue`) using a non-blocking `select`. When the queue reaches its fixed capacity limit (default 65,536 jobs, sized from startup config `queue_size`), the incoming job is dropped immediately, the metric `halp_pings_dropped_total{reason="queue_full"}` is incremented, and the handler returns `202 Accepted` with an empty body in under 3 ms.
+
+Reasoning:
+1. In accordance with AGENTS.md Invariant 2, the HTTP handler must complete in under 3 ms and never await a push service, disk write, or DNS lookup. Blocking on channel send when workers are saturated would violate the latency ceiling and cascade upstream into HTTP connection timeouts.
+2. In accordance with AGENTS.md Invariant 7 ("Enforcement is invisible to the sender"), returning `429 Too Many Requests` or an error would signal system overload and invite retry amplification from well-behaved clients or give attackers feedback on queue depth.
+3. Best-effort delivery is an explicit design choice ("Losses are acceptable; lying about them is not"). Drops under load are counted via Prometheus metrics rather than masked by un-bounded buffers or blocking retries.
+
+### 33. Coalesce accumulator eviction and memory bounds → **in-memory counter map bounded by fixed capacity, stale jobs discarded on ingestion**
+
+Decided: the coalesce accumulator (`server/internal/coalesce/`) aggregates incoming appreciation pings purely as an in-memory map keyed by recipient `core.AccountID` to an accumulator entry containing only a count $N$ and first/last seen timestamps. In accordance with Invariant 1, the entry contains no sender fields, handles, or message records.
+
+Stale jobs older than `dispatch.max_age` (30 s) are dropped on ingress and counted as `obs.DropReasonStale`. The accumulator has a fixed capacity bound (`max_recipients`, default 100,000) satisfying Invariant 8. Expired entries are extracted by the flush loop into `core.Digest` structs carrying only recipient ID and count $N$. The `/v1/pending` endpoint atomically clears and returns the pending count for cold-start and reconnection synchronization.
+
+### 34. Web Push encryption and keypair caching → **in-house RFC 8291/8188 with stdlib crypto, per-subscription shared secret caching with fresh salt per message**
+
+Decided: Web Push encryption is implemented in-house (`server/internal/push/webpush/`) using pure Go stdlib (`crypto/ecdh`, `crypto/hkdf`, `crypto/aes`, `crypto/cipher`, `crypto/ecdsa`, `crypto/rand`) without any third-party dependencies.
+
+To satisfy the dispatch worker pool CPU budget, the ECDH shared secret between the application server and the subscription's `p256dh` public key is cached per subscription endpoint. Benchmark results confirm a 23× speedup: ~1.45 µs per encryption with key cache vs ~33.4 µs without.
+
+Crucially, the 16-byte salt is generated afresh from `crypto/rand` for every single message, strictly preventing AES-GCM nonce reuse under the same CEK. Plaintext pings without count are sent payloadless (zero-byte body, omitting `Content-Encoding`), minimizing bandwidth and processing overhead.
+
+### 35. Dispatch token lifecycle and mid-flight re-registration pruning guard → **Authoritative prune only on 404/410 where created_day <= send_start_day**
+
+Decided: Web Push subscriptions are pruned exclusively upon authoritative rejection (`404 Not Found` or `410 Gone`). The deletion query is strictly scoped as:
+`DELETE FROM subscriptions WHERE endpoint = ? AND created_day <= ?`
+where the timestamp bound is `send_start_day` captured immediately before the HTTP dispatch request is dispatched over the network.
+
+Reasoning:
+1. In accordance with AGENTS.md Invariant 4, transient errors (`429`, `500`, `502`, `503`, timeouts, or network/DNS drops) must never trigger subscription deletion. Pruning on transient faults would silently cause users to stop receiving pings without notification.
+2. In-flight race conditions: if a client device unregisters and re-registers the same endpoint while a push dispatch request is in flight, the re-registered row has a newer `created_day`. Requiring `created_day <= send_start_day` ensures that the newly created row is preserved when the prior send's 410 response returns.
+3. No retries or outbound queues: failed push attempts are dropped immediately and counted in metrics, preserving the best-effort delivery contract.
+
 ### 36. SSE hub connection memory ceiling and idle demotion → **4.5 KB/conn measured footprint, 25 s heartbeats, 15 m idle demotion**
 
 Decided: the Server-Sent Events hub (`internal/stream`) manages real-time streaming connections over `GET /v1/stream` with strict fixed-capacity per-connection channel buffers (16 frames) and an overall ceiling of 10,000 connections. Heartbeats (`event: ka`) are emitted every 25 seconds. Connections without incoming appreciation activity are demoted after `idle.demote_after` (default 15 minutes), gracefully terminating the stream with an `event: demote` message and directing clients to poll `GET /v1/pending`.
