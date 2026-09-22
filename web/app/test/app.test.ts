@@ -276,3 +276,20 @@ test('App showcase renders all 5 preview tabs', () => {
     assert.strictEqual(showcase.id, 'showcase');
   }
 });
+
+test('Landing page theme features friendly, caring, happy design tokens', () => {
+  // Check that landing pills reflect the happy, caring, positive theme
+  assert.ok(COPY.landing.pills.some((p) => p.includes('Spread happiness')));
+  assert.ok(COPY.landing.pills.some((p) => p.includes('Lift teammates up')));
+  assert.ok(COPY.landing.pills.some((p) => p.includes('Zero reply pressure')));
+  assert.ok(COPY.landing.pills.some((p) => p.includes('Pure positive appreciation')));
+
+  // Check that stylesheet incorporates warm, friendly, happy tokens
+  const cssPath = path.resolve(import.meta.dirname, '../src/styles.css');
+  const css = fs.readFileSync(cssPath, 'utf8');
+  assert.ok(css.includes('--bg: #fdfaf6'), 'Warm ivory light background');
+  assert.ok(css.includes('--accent: #d45630'), 'Warm cheerful coral accent');
+  assert.ok(css.includes('--surface-warm'), 'Warm surface layer defined');
+  assert.ok(css.includes('--bg: #1c1817'), 'Cozy midnight hearth dark background');
+  assert.ok(css.includes('--accent: #f27854'), 'Cozy peach coral dark accent');
+});

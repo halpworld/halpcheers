@@ -86,10 +86,10 @@ export const COPY = {
     getStartedBtn: 'Start spreading appreciation',
     loginBtn: 'Log in with key',
     pills: [
-      'Spread happiness',
-      'Lift teammates up',
-      'Zero reply pressure',
-      'Pure positive appreciation',
+      '☀️ Spread happiness',
+      '💛 Lift teammates up',
+      '🌱 Zero reply pressure',
+      '✨ Pure positive appreciation',
     ],
   },
 };
