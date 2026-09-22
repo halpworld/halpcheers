@@ -513,3 +513,9 @@ Reasoning:
 2. In accordance with the capacity budget in docs/ARCHITECTURE.md (12–20 KB/conn), measurements with 1,000 active connections demonstrate a heap footprint of ~4.56 KB per connection, ensuring 10,000 concurrent desktop/web clients consume less than 50 MB of RAM.
 3. Idle demotion to `GET /v1/pending` prevents inactive browser tabs from indefinitely exhausting connection limits while ensuring pings are never missed.
 
+### 37. Settings boundaries and abuse reporting semantics → **bounded validation, idempotent blocks, uniform 200 response**
+
+Decided: Settings updates via `PUT /v1/settings` strictly enforce config boundaries (`digest_window_s` [0, 86400], `max_per_hour` [1, 60], `min_count` [1, 1000], `quiet_start`/`quiet_end` [0, 23], valid IANA timezone `tz`, and mode `all`|`groups_only`|`paused`). Out-of-range inputs are rejected with 400 Bad Request rather than silently clamped. Quiet hours and timezones are evaluated as user preferences, not stored timestamps.
+
+Abuse reporting via `POST /v1/handles/{handle}/report-abuse` resolves the top sender from the in-memory Count-Min sketch for the handle (if owned by the calling session) and writes a single `(sender_account_id, handle, created_day)` row into `blocks`. The endpoint returns an identical 200 OK `{"status":"ok"}\n` response regardless of whether the handle exists, is owned by another account, has no recorded traffic, or successfully blocks a sender (invariants 6 and 7). Blocks are pruned after 365 days by `SweepExpiredBlocks`.
+
