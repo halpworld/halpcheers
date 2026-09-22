@@ -107,9 +107,19 @@ number, never a list of senders, so this does not violate invariant 1.
 
 ## Capacity budget
 
-These are budgets to design and benchmark against, not measurements, and not
-launch expectations. The 100M/day figure is a ceiling to avoid designing
-ourselves out of.
+These are budgets to design and benchmark against. Measured figures from the
+Wave 3 load test harness (`loadtest/results/2026-09-22.md`) validate these desk
+derivations:
+
+| Metric | Budgeted | Measured (Wave 3) | Target VPS Headroom |
+| :--- | :--- | :--- | :--- |
+| Ingress p50 | < 1 ms | **0.11 ms** | ~10× headroom |
+| Ingress p99 | < 3 ms | **1.23 ms** | Invariant 2 (< 3 ms) satisfied |
+| Ingress p99.9 | < 5 ms | **4.90 ms** | Ingress SLA satisfied |
+| Sustained Ingress | 1,200 RPS | **1,200 RPS sustained** | ~2.8× CPU headroom on 2 vCPU |
+| Burst Ingress | 10,000 req burst | **9,987 RPS wire rate** | Clean drop counter on queue full |
+| SSE RAM / connection | 12–20 KB | **13.11 KB** | 10k streams = 128 MB (< 200 MB budget) |
+| Timing Uniformity | p50/p99 overlap | **K-S $D \le 0.30$, p99 $\Delta < 1$ ms** | Invariant 7 verified |
 
 **Ingress.** 100M pings/day ≈ 1,200 avg RPS with bursts to 10k. Trivial for Go:
 the per-request work above is a few microseconds plus TLS. Budget one vCPU.
@@ -135,9 +145,11 @@ work on 2–4 vCPU.
 > key-and-nonce reuse. Make that a test.
 
 **SSE connections are the memory risk.** Each open connection costs a goroutine
-stack plus read/write buffers — budget ~12–20 KB with tuned buffers. That puts a
-4 GB box somewhere around 50–100k concurrent desktop/TUI clients before memory,
-not CPU, stops us. Also budget file descriptors (`ulimit -n`) and conntrack.
+stack plus read/write buffers — measured at **13.11 KB** in the Wave 3 benchmark,
+well within the budgeted ~12–20 KB. 10,000 concurrent held connections consume
+~128 MB of heap. That puts a 4 GB box somewhere around 50–100k concurrent
+desktop/TUI clients before memory, not CPU, stops us. Also budget file
+descriptors (`ulimit -n`) and conntrack.
 Mitigations, in order of preference:
 
 1. Most users are browser users on Web Push and hold no connection at all.

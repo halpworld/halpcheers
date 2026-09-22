@@ -42,3 +42,7 @@ jobs:
 
       - name: Invariant 9 Check (No Identifier Leaks)
         run: go run ./cmd/check-invariant9 .
+
+      - name: Red-Team Exit Criteria Suite
+        working-directory: redteam
+        run: go test -v -race ./...

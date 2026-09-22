@@ -44,13 +44,14 @@ func main() {
 
 	// -------------------------------------------------------------------------
 	// Feature Service Wiring
-	// Wave 1 tracks construct and inject their implementations into RouterDeps here.
+	// Wire all Wave 1 implementations into RouterDeps and start background pumps.
 	// -------------------------------------------------------------------------
-	routerDeps := internalhttp.RouterDeps{
-		Metrics:      metrics,
-		MaxBodyBytes: int64(cfg.Reloadable().ContactsMaxBytes),
-		ReqTimeout:   cfg.Startup.ShutdownDrainTimeout,
+	routerDeps, assembly, err := internalhttp.AssembleDependencies(ctx, cfg, st, metrics)
+	if err != nil {
+		log.Fatalf("failed to assemble dependencies: %v", err)
 	}
+	defer assembly.Close()
+	assembly.Start(ctx)
 
 	// 4. Construct router (router.go is frozen after Wave 0)
 	router := internalhttp.NewRouter(routerDeps)

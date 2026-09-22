@@ -309,6 +309,7 @@ type Service struct {
 	senderBuckets sync.Map // AccountID -> *TokenBucket
 	targetBuckets sync.Map // handle string -> *TokenBucket
 	suspended     sync.Map // AccountID -> bool
+	topSenders    sync.Map // handle string -> topSenderRecord
 
 	pairMaxPersonal int
 	pairMaxSocial   int
@@ -459,8 +460,34 @@ func (s *Service) Allow(ctx context.Context, sender core.AccountID, target core.
 	ewmaVal, _ := s.targetEWMAs.LoadOrStore(target.Raw(), NewEWMA(60*time.Second))
 	ewmaVal.(*EWMA).Add(1.0)
 	s.sketch.Add(target, sender)
+	est := s.sketch.Estimate(target, sender)
+	if actual, loaded := s.topSenders.Load(target.Raw()); !loaded {
+		s.topSenders.Store(target.Raw(), topSenderRecord{sender: sender, count: est})
+	} else {
+		rec := actual.(topSenderRecord)
+		if est >= rec.count {
+			s.topSenders.Store(target.Raw(), topSenderRecord{sender: sender, count: est})
+		}
+	}
 
 	return true
+}
+
+type topSenderRecord struct {
+	sender core.AccountID
+	count  uint32
+}
+
+// TopSender returns the heaviest sender into handle for the current window.
+// Satisfies settings.TopSenderEstimator interface.
+func (s *Service) TopSender(ctx context.Context, handle core.Handle) (core.AccountID, bool) {
+	if val, ok := s.topSenders.Load(handle.Raw()); ok {
+		rec := val.(topSenderRecord)
+		if rec.count > 0 {
+			return rec.sender, true
+		}
+	}
+	return 0, false
 }
 
 // Difficulty implements pow.DifficultyFeed seam. Raises PoW on EWMA spike.

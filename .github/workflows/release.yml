@@ -1,0 +1,152 @@
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-desktop:
+    name: Build (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { os: macos-latest, name: macos, target: universal-apple-darwin }
+          - { os: windows-latest, name: windows, target: x86_64-pc-windows-msvc }
+          - { os: ubuntu-22.04, name: linux, target: x86_64-unknown-linux-gnu }
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform.os == 'macos-latest' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
+
+      - name: Install Linux system dependencies
+        if: matrix.platform.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Build Core and Desktop Frontend
+        run: |
+          npm ci --prefix web/core
+          npm ci --prefix desktop
+          npm run build --prefix desktop
+
+      - name: Inspect Signing Secrets
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform.os }}" = "macos-latest" ]; then
+            if [ -n "${{ secrets.APPLE_CERTIFICATE }}" ]; then
+              echo "APPLE_SIGNING_READY=true" >> "$GITHUB_ENV"
+              echo "::notice::Apple Developer certificate configured for signing and notarisation."
+            else
+              echo "APPLE_SIGNING_READY=false" >> "$GITHUB_ENV"
+              echo "::notice::APPLE_CERTIFICATE is unset. Building unsigned macOS bundle without notarisation."
+            fi
+          elif [ "${{ matrix.platform.os }}" = "windows-latest" ]; then
+            if [ -n "${{ secrets.WINDOWS_CERTIFICATE }}" ]; then
+              echo "WINDOWS_SIGNING_READY=true" >> "$GITHUB_ENV"
+              echo "::notice::Windows code signing certificate configured."
+            else
+              echo "WINDOWS_SIGNING_READY=false" >> "$GITHUB_ENV"
+              echo "::notice::WINDOWS_CERTIFICATE is unset. Building unsigned Windows installer."
+            fi
+          fi
+
+      - name: Build Tauri Application
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENABLE_CODE_SIGNING: ${{ env.APPLE_SIGNING_READY == 'true' && 'true' || '' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Halp Desktop ${{ github.ref_name }}'
+          releaseBody: 'Release ${{ github.ref_name }} of the Halp Desktop client.'
+          releaseDraft: false
+          prerelease: false
+
+      - name: Upload Platform Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: halp-desktop-${{ matrix.platform.name }}
+          path: |
+            desktop/src-tauri/target/release/bundle/*/*
+          if-no-files-found: warn
+
+  checksums:
+    name: Checksums & Detached Signatures
+    needs: build-desktop
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download all built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Generate SHA-256 Checksums
+        working-directory: release-artifacts
+        run: |
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Generate Detached GPG Signature
+        id: gpg-sign
+        working-directory: release-artifacts
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.GPG_PRIVATE_KEY }}" ]; then
+            echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+            if [ -n "${{ secrets.GPG_PASSPHRASE }}" ]; then
+              echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 --armor --detach-sign SHA256SUMS
+            else
+              gpg --batch --yes --armor --detach-sign SHA256SUMS
+            fi
+            echo "::notice::Detached GPG signature SHA256SUMS.asc created successfully."
+          else
+            echo "::notice::GPG_PRIVATE_KEY is unset. Skipping detached GPG signature generation."
+          fi
+
+      - name: Attach Checksums to Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release-artifacts/SHA256SUMS
+            release-artifacts/SHA256SUMS.asc
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

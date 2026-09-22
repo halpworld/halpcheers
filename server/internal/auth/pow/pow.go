@@ -1,6 +1,7 @@
 package pow
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -221,6 +222,13 @@ func (e *Engine) getChallenge(epoch uint64, cur uint64) ([32]byte, bool) {
 	}
 }
 
+// Challenge returns the challenge for an epoch if within tolerance [cur-1, cur+1].
+func (e *Engine) Challenge(epoch uint64) [32]byte {
+	cur := e.CurrentEpoch()
+	chal, _ := e.getChallenge(epoch, cur)
+	return chal
+}
+
 // Difficulty returns the required difficulty for a target and sender.
 func (e *Engine) Difficulty(target string, sender core.AccountID) uint8 {
 	diff := e.floorDifficulty
@@ -271,6 +279,36 @@ func (e *Engine) Verify(handle string, tokenHeader string, target string, sender
 
 	requiredDiff := e.Difficulty(target, sender)
 	if !CheckPoW(handle, epoch, challenge, nonce, requiredDiff) {
+		if e.metrics != nil {
+			e.metrics.IncPingsDropped(obs.DropReasonInvalidPoW)
+		}
+		return ErrInsufficient
+	}
+
+	return nil
+}
+
+// VerifySignupPoW verifies a proof-of-work token for account registration.
+// Evaluates SHA-256("signup" || epoch || challenge || nonce) against signup difficulty.
+func (e *Engine) VerifySignupPoW(ctx context.Context, tokenHeader string) error {
+	epoch, nonce, err := ParseToken(tokenHeader)
+	if err != nil {
+		if e.metrics != nil {
+			e.metrics.IncPingsDropped(obs.DropReasonInvalidPoW)
+		}
+		return err
+	}
+
+	cur := e.CurrentEpoch()
+	challenge, ok := e.getChallenge(epoch, cur)
+	if !ok {
+		if e.metrics != nil {
+			e.metrics.IncPingsDropped(obs.DropReasonInvalidPoW)
+		}
+		return ErrExpiredEpoch
+	}
+
+	if !CheckPoW("signup", epoch, challenge, nonce, e.signupDiff) {
 		if e.metrics != nil {
 			e.metrics.IncPingsDropped(obs.DropReasonInvalidPoW)
 		}
