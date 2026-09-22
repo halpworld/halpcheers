@@ -432,11 +432,6 @@ in-process LRU cache and the operating system page cache. The operational stabil
 of a pure Go static binary in a scratch container cleanly satisfies the "one
 deployable" goal in [ARCHITECTURE.md](ARCHITECTURE.md) and invariant 3.
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 ### 28. PoW difficulty calibration and clock skew tolerance → **d=14 floor, d=21 signup, ±1 epoch skew tolerance**
 
 Decided: the default global floor `pow.floor_ms = 10` corresponds to $d=14$ leading zero bits ($2^{14} = 16,384$ hashes, ~10 ms client compute). Signup `pow.signup_ms = 1500` maps to $d=21$ leading zero bits ($2^{21} = 2,097,152$ hashes, ~1.4–1.5 s client compute).
@@ -527,5 +522,4 @@ Abuse reporting via `POST /v1/handles/{handle}/report-abuse` resolves the top se
 ### 38. Public landing pages and SVG badge semantics → **byte-identical responses, no-JS fallback, 300 ms perceived latency floor**
 
 Decided: Public endpoints `GET /h/{handle}` and `GET /@{alias}` serve byte-identical HTML and response headers across existing, nonexistent, paused, and blocked handles (invariant 7: no existence or timing oracle). The page is fully functional without JavaScript via a standard HTML form POST that transitions to a terminal "Sent." state. When JavaScript is present, client-side progressive enhancement holds a 300 ms perceived-latency floor before transitioning the button to "Sent." so that fast drops and accepted pings are indistinguishable to a human observer. The SVG badge at `GET /badge/{handle}.svg` renders a plain static "appreciate me" badge with no counter (decision 8) and immutable long-lived caching.
-
 
