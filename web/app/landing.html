@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Halp — Someone appreciates you.</title>
+  <meta name="description" content="Send a person an anonymous 'someone appreciates you' ping. Nothing else, ever.">
+  <link rel="stylesheet" href="./src/styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "@halp/core": "./dist/core/index.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module">
+    import { HalpApp } from './dist/main.js';
+    const container = document.getElementById('app');
+    if (container) {
+      const app = new HalpApp(container);
+      app.currentView = 'landing';
+      app.render();
+    }
+  </script>
+</body>
+</html>

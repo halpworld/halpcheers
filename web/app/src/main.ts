@@ -117,16 +117,53 @@ export class HalpApp {
     const savedKey = await loadAccountKey();
     if (savedKey && isAccountKeyShaped(savedKey)) {
       this.currentKey = savedKey;
-      try {
-        await this.client.loginWithAccountKey(savedKey);
-        await this.loadData();
-        this.currentView = 'home';
-        this.initTransport();
-      } catch {
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('hashchange', () => this.handleHashChange());
+    }
+
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    if (hash === '#app' || hash === '#home') {
+      if (this.currentKey) {
+        try {
+          await this.client.loginWithAccountKey(this.currentKey);
+          await this.loadData();
+          this.currentView = 'home';
+          this.initTransport();
+        } catch {
+          this.currentView = 'home';
+        }
+      } else {
         this.currentView = 'login';
       }
+    } else if (hash === '#login') {
+      this.currentView = 'login';
+    } else if (hash === '#register' || hash === '#key_wall') {
+      if (!this.currentKey) this.currentKey = generateAccountKey();
+      this.currentView = 'key_wall';
     } else {
-      // First run: show landing page
+      // Default for root / is always the landing page
+      this.currentView = 'landing';
+    }
+
+    this.render();
+  }
+
+  handleHashChange(): void {
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    if (hash === '#app' || hash === '#home') {
+      if (this.currentKey) {
+        this.currentView = 'home';
+      } else {
+        this.currentView = 'login';
+      }
+    } else if (hash === '#login') {
+      this.currentView = 'login';
+    } else if (hash === '#register' || hash === '#key_wall') {
+      if (!this.currentKey) this.currentKey = generateAccountKey();
+      this.currentView = 'key_wall';
+    } else {
       this.currentView = 'landing';
     }
     this.render();
@@ -261,27 +298,61 @@ export class HalpApp {
     const actions = document.createElement('div');
     actions.className = 'landing-nav-actions';
 
-    const loginBtn = document.createElement('button');
-    loginBtn.type = 'button';
-    loginBtn.className = 'btn btn-secondary';
-    loginBtn.textContent = 'Log In';
-    loginBtn.onclick = () => {
-      this.currentView = 'login';
-      this.render();
-    };
+    if (this.currentKey) {
+      const loginBtn = document.createElement('button');
+      loginBtn.type = 'button';
+      loginBtn.className = 'btn btn-secondary';
+      loginBtn.textContent = 'Switch Account';
+      loginBtn.onclick = () => {
+        this.currentView = 'login';
+        if (typeof window !== 'undefined') window.location.hash = '#login';
+        this.render();
+      };
 
-    const registerBtn = document.createElement('button');
-    registerBtn.type = 'button';
-    registerBtn.className = 'btn';
-    registerBtn.textContent = 'Get Started';
-    registerBtn.onclick = () => {
-      this.currentKey = generateAccountKey();
-      this.currentView = 'key_wall';
-      this.render();
-    };
+      const appBtn = document.createElement('button');
+      appBtn.type = 'button';
+      appBtn.className = 'btn';
+      appBtn.textContent = 'Open Dashboard →';
+      appBtn.onclick = async () => {
+        try {
+          await this.client.loginWithAccountKey(this.currentKey!);
+          await this.loadData();
+          this.currentView = 'home';
+          this.initTransport();
+        } catch {
+          this.currentView = 'home';
+        }
+        if (typeof window !== 'undefined') window.location.hash = '#app';
+        this.render();
+      };
 
-    actions.appendChild(loginBtn);
-    actions.appendChild(registerBtn);
+      actions.appendChild(loginBtn);
+      actions.appendChild(appBtn);
+    } else {
+      const loginBtn = document.createElement('button');
+      loginBtn.type = 'button';
+      loginBtn.className = 'btn btn-secondary';
+      loginBtn.textContent = 'Log In';
+      loginBtn.onclick = () => {
+        this.currentView = 'login';
+        if (typeof window !== 'undefined') window.location.hash = '#login';
+        this.render();
+      };
+
+      const registerBtn = document.createElement('button');
+      registerBtn.type = 'button';
+      registerBtn.className = 'btn';
+      registerBtn.textContent = 'Get Started';
+      registerBtn.onclick = () => {
+        this.currentKey = generateAccountKey();
+        this.currentView = 'key_wall';
+        if (typeof window !== 'undefined') window.location.hash = '#register';
+        this.render();
+      };
+
+      actions.appendChild(loginBtn);
+      actions.appendChild(registerBtn);
+    }
 
     header.appendChild(brandGroup);
     header.appendChild(nav);
@@ -314,27 +385,61 @@ export class HalpApp {
     const ctaGroup = document.createElement('div');
     ctaGroup.className = 'hero-cta-group';
 
-    const getStartedBtn = document.createElement('button');
-    getStartedBtn.type = 'button';
-    getStartedBtn.className = 'btn btn-hero';
-    getStartedBtn.textContent = 'Create Account — 1-Click Key';
-    getStartedBtn.onclick = () => {
-      this.currentKey = generateAccountKey();
-      this.currentView = 'key_wall';
-      this.render();
-    };
+    if (this.currentKey) {
+      const appBtn = document.createElement('button');
+      appBtn.type = 'button';
+      appBtn.className = 'btn btn-hero';
+      appBtn.textContent = 'Go to Your Dashboard →';
+      appBtn.onclick = async () => {
+        try {
+          await this.client.loginWithAccountKey(this.currentKey!);
+          await this.loadData();
+          this.currentView = 'home';
+          this.initTransport();
+        } catch {
+          this.currentView = 'home';
+        }
+        if (typeof window !== 'undefined') window.location.hash = '#app';
+        this.render();
+      };
 
-    const loginBtn = document.createElement('button');
-    loginBtn.type = 'button';
-    loginBtn.className = 'btn btn-secondary btn-hero-secondary';
-    loginBtn.textContent = 'Log In with Account Key';
-    loginBtn.onclick = () => {
-      this.currentView = 'login';
-      this.render();
-    };
+      const loginBtn = document.createElement('button');
+      loginBtn.type = 'button';
+      loginBtn.className = 'btn btn-secondary btn-hero-secondary';
+      loginBtn.textContent = 'Log In with Another Key';
+      loginBtn.onclick = () => {
+        this.currentView = 'login';
+        if (typeof window !== 'undefined') window.location.hash = '#login';
+        this.render();
+      };
 
-    ctaGroup.appendChild(getStartedBtn);
-    ctaGroup.appendChild(loginBtn);
+      ctaGroup.appendChild(appBtn);
+      ctaGroup.appendChild(loginBtn);
+    } else {
+      const getStartedBtn = document.createElement('button');
+      getStartedBtn.type = 'button';
+      getStartedBtn.className = 'btn btn-hero';
+      getStartedBtn.textContent = 'Create Account — 1-Click Key';
+      getStartedBtn.onclick = () => {
+        this.currentKey = generateAccountKey();
+        this.currentView = 'key_wall';
+        if (typeof window !== 'undefined') window.location.hash = '#register';
+        this.render();
+      };
+
+      const loginBtn = document.createElement('button');
+      loginBtn.type = 'button';
+      loginBtn.className = 'btn btn-secondary btn-hero-secondary';
+      loginBtn.textContent = 'Log In with Account Key';
+      loginBtn.onclick = () => {
+        this.currentView = 'login';
+        if (typeof window !== 'undefined') window.location.hash = '#login';
+        this.render();
+      };
+
+      ctaGroup.appendChild(getStartedBtn);
+      ctaGroup.appendChild(loginBtn);
+    }
 
     const heroVisual = document.createElement('div');
     heroVisual.className = 'hero-visual-card';
@@ -966,20 +1071,47 @@ export class HalpApp {
     const brand = document.createElement('div');
     brand.className = 'brand';
     brand.textContent = 'halp';
+    brand.style.cursor = 'pointer';
+    brand.title = 'Back to Landing Page';
+    brand.onclick = () => {
+      this.currentView = 'landing';
+      if (typeof window !== 'undefined') window.location.hash = '';
+      this.render();
+    };
 
     const nav = document.createElement('nav');
     nav.className = 'nav-links';
 
+    const landingLink = document.createElement('a');
+    landingLink.href = '#';
+    landingLink.textContent = 'Overview';
+    landingLink.onclick = (e) => {
+      e.preventDefault();
+      this.currentView = 'landing';
+      if (typeof window !== 'undefined') window.location.hash = '';
+      this.render();
+    };
+
     const homeLink = document.createElement('a');
     homeLink.href = '#';
     homeLink.textContent = 'Home';
-    homeLink.onclick = (e) => { e.preventDefault(); this.currentView = 'home'; this.render(); };
+    homeLink.onclick = (e) => {
+      e.preventDefault();
+      this.currentView = 'home';
+      if (typeof window !== 'undefined') window.location.hash = '#app';
+      this.render();
+    };
 
     const settingsLink = document.createElement('a');
     settingsLink.href = '#';
     settingsLink.textContent = 'Settings';
-    settingsLink.onclick = (e) => { e.preventDefault(); this.currentView = 'settings'; this.render(); };
+    settingsLink.onclick = (e) => {
+      e.preventDefault();
+      this.currentView = 'settings';
+      this.render();
+    };
 
+    nav.appendChild(landingLink);
     nav.appendChild(homeLink);
     nav.appendChild(settingsLink);
     header.appendChild(brand);
