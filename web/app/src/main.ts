@@ -82,14 +82,14 @@ export const COPY = {
   landing: {
     heroTitle: 'Someone appreciates you.',
     heroSubtitle:
-      'An ultra-lightweight, zero-payload appreciation utility. Send and receive anonymous appreciation pings. No text, no sender identity, no tracking, and no message records — ever.',
-    getStartedBtn: 'Get started — create key',
+      'A quiet, heartfelt way to share positive energy with workmates, friends, and creators around the world. No reply pressure, no unsolicited noise, no awkwardness — just the honest, uplifting feeling of knowing your work and presence are appreciated.',
+    getStartedBtn: 'Start spreading appreciation',
     loginBtn: 'Log in with key',
     pills: [
-      'Zero tracking',
-      'No message records',
-      'Single EU region',
-      '100% Anonymous',
+      'Spread happiness',
+      'Lift teammates up',
+      'Zero reply pressure',
+      'Pure positive appreciation',
     ],
   },
 };
@@ -243,15 +243,20 @@ export class HalpApp {
   // Landing Page Renderer
   // ---------------------------------------------------------------------------
 
+  // ---------------------------------------------------------------------------
+  // Landing Page Renderer
+  // ---------------------------------------------------------------------------
+
   renderLanding(): HTMLElement {
     const landing = document.createElement('div');
     landing.className = 'landing-page';
 
     landing.appendChild(this.renderLandingHeader());
     landing.appendChild(this.renderHero());
+    landing.appendChild(this.renderWhyAppreciationMatters());
     landing.appendChild(this.renderAppShowcase());
     landing.appendChild(this.renderHowItWorks());
-    landing.appendChild(this.renderSecurityGuarantees());
+    landing.appendChild(this.renderSafeAndRespectful());
     landing.appendChild(this.renderQuickAccess());
     landing.appendChild(this.renderLandingFooter());
 
@@ -271,7 +276,7 @@ export class HalpApp {
 
     const tag = document.createElement('span');
     tag.className = 'brand-subtitle';
-    tag.textContent = 'anonymous appreciation';
+    tag.textContent = 'spread appreciation & joy';
 
     brandGroup.appendChild(brand);
     brandGroup.appendChild(tag);
@@ -279,9 +284,13 @@ export class HalpApp {
     const nav = document.createElement('nav');
     nav.className = 'landing-nav-links';
 
+    const whyLink = document.createElement('a');
+    whyLink.href = '#why-it-matters';
+    whyLink.textContent = 'Why Appreciation';
+
     const showcaseLink = document.createElement('a');
     showcaseLink.href = '#showcase';
-    showcaseLink.textContent = 'Screenshots';
+    showcaseLink.textContent = 'The Experience';
 
     const howLink = document.createElement('a');
     howLink.href = '#how-it-works';
@@ -289,8 +298,9 @@ export class HalpApp {
 
     const secLink = document.createElement('a');
     secLink.href = '#security';
-    secLink.textContent = 'Privacy';
+    secLink.textContent = 'Respect & Privacy';
 
+    nav.appendChild(whyLink);
     nav.appendChild(showcaseLink);
     nav.appendChild(howLink);
     nav.appendChild(secLink);
@@ -419,7 +429,7 @@ export class HalpApp {
       const getStartedBtn = document.createElement('button');
       getStartedBtn.type = 'button';
       getStartedBtn.className = 'btn btn-hero';
-      getStartedBtn.textContent = 'Create Account — 1-Click Key';
+      getStartedBtn.textContent = 'Start Spreading Appreciation';
       getStartedBtn.onclick = () => {
         this.currentKey = generateAccountKey();
         this.currentView = 'key_wall';
@@ -445,13 +455,13 @@ export class HalpApp {
     heroVisual.className = 'hero-visual-card';
 
     const heroImg = document.createElement('img');
-    heroImg.src = './assets/halp-privacy-shield.jpg';
-    heroImg.alt = 'Halp cryptographic privacy shield';
+    heroImg.src = './assets/halp-appreciation-warmth.jpg';
+    heroImg.alt = 'Spreading quiet warmth and appreciation across teams worldwide';
     heroImg.className = 'hero-asset-img';
 
     const heroVisualCaption = document.createElement('div');
     heroVisualCaption.className = 'hero-visual-caption';
-    heroVisualCaption.textContent = 'Argon2id authentication with zero password, zero email, and zero recovery backdoors.';
+    heroVisualCaption.textContent = 'A quiet spark of appreciation. No unsolicited comments, no reply obligations — just pure, honest recognition that brightens someone\'s day.';
 
     heroVisual.appendChild(heroImg);
     heroVisual.appendChild(heroVisualCaption);
@@ -465,6 +475,71 @@ export class HalpApp {
     return hero;
   }
 
+  renderWhyAppreciationMatters(): HTMLElement {
+    const section = document.createElement('section');
+    section.id = 'why-it-matters';
+    section.className = 'why-matters-section';
+
+    const header = document.createElement('div');
+    header.className = 'section-header';
+
+    const title = document.createElement('h2');
+    title.textContent = 'Spreading Positive Energy at Work and Beyond';
+
+    const desc = document.createElement('p');
+    desc.className = 'caption';
+    desc.textContent = 'Modern work can be busy, stressful, and isolating. A quiet moment of genuine appreciation changes everything.';
+
+    header.appendChild(title);
+    header.appendChild(desc);
+    section.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'matters-grid';
+
+    const cards = [
+      {
+        badge: 'Workmates & Remote Teams',
+        title: 'Lift up colleagues effortlessly',
+        desc: 'Notice a teammate who stayed late to fix a critical bug, led a great sprint, or quietly supported someone? Send them a quick appreciation ping. No meeting required, no performative flattery, no social debt — just pure, honest recognition that brightens their day.',
+      },
+      {
+        badge: 'Creators & Communities',
+        title: 'Say thank you across the world',
+        desc: 'Open source maintainers, indie creators, educators, and community volunteers give endless hours for free. A simple appreciation ping on their profile tells them their hard work made a genuine difference to someone, somewhere in the world.',
+      },
+      {
+        badge: 'Pure Positivity',
+        title: 'Zero reply pressure, zero obligations',
+        desc: 'Traditional messages demand answers, emoji replies, and endless small talk. Halp creates a peaceful space where appreciation is freely given and received with a smile, without placing any burden or social debt on the recipient.',
+      },
+    ];
+
+    for (const c of cards) {
+      const card = document.createElement('div');
+      card.className = 'card matter-card';
+
+      const badge = document.createElement('span');
+      badge.className = 'matter-badge';
+      badge.textContent = c.badge;
+
+      const h3 = document.createElement('h3');
+      h3.textContent = c.title;
+
+      const p = document.createElement('p');
+      p.className = 'caption';
+      p.textContent = c.desc;
+
+      card.appendChild(badge);
+      card.appendChild(h3);
+      card.appendChild(p);
+      grid.appendChild(card);
+    }
+
+    section.appendChild(grid);
+    return section;
+  }
+
   renderAppShowcase(): HTMLElement {
     const section = document.createElement('section');
     section.id = 'showcase';
@@ -474,11 +549,11 @@ export class HalpApp {
     header.className = 'section-header';
 
     const title = document.createElement('h2');
-    title.textContent = 'The Halp Experience';
+    title.textContent = 'The Joy of Simple Appreciation';
 
     const desc = document.createElement('p');
     desc.className = 'caption';
-    desc.textContent = 'Interactive screenshots of Halp across every interaction — crisp, distraction-free, and respectful of your attention.';
+    desc.textContent = 'Explore how Halp delivers quiet moments of happiness across teams, workspaces, and communities worldwide.';
 
     header.appendChild(title);
     header.appendChild(desc);
@@ -489,11 +564,11 @@ export class HalpApp {
     tabsContainer.setAttribute('role', 'tablist');
 
     const tabDefs = [
-      { id: 0, label: 'Arrival Counter (Home)' },
-      { id: 1, label: 'Appreciation Ping' },
-      { id: 2, label: 'Private Handles & QR' },
-      { id: 3, label: 'Cryptographic Key' },
-      { id: 4, label: 'Quiet Delivery' },
+      { id: 0, label: 'Arrival of Happiness (Home)' },
+      { id: 1, label: 'Send a Spark of Joy' },
+      { id: 2, label: 'Share Kindness Anywhere' },
+      { id: 3, label: 'Personal Key Wall' },
+      { id: 4, label: 'Gentle Delivery Settings' },
     ];
 
     for (const tab of tabDefs) {
@@ -555,6 +630,19 @@ export class HalpApp {
 
     windowFrame.appendChild(winBody);
     section.appendChild(windowFrame);
+
+    const explainerTexts = [
+      'The Home Dashboard shows the quiet arrival of appreciation. No unread counts, no guilt, no pressure to respond.',
+      'The Recipient Page is pure simplicity: one tap to send an anonymous spark of joy to a colleague or creator.',
+      'Effortless sharing: place your private link or QR code anywhere colleagues, contributors, or followers can find it.',
+      'Zero passwords, zero data harvesting: your 16-digit client key keeps you in complete control without surrendering personal data.',
+      'Gentle delivery settings: batch arrivals into hourly or daily digests, or pause whenever you need uninterrupted focus.',
+    ];
+
+    const explainer = document.createElement('div');
+    explainer.className = 'mock-explainer';
+    explainer.innerHTML = `<strong>Experience Highlight:</strong> ${explainerTexts[this.activePreviewTab] || ''}`;
+    section.appendChild(explainer);
 
     return section;
   }
@@ -809,11 +897,11 @@ export class HalpApp {
     header.className = 'section-header';
 
     const title = document.createElement('h2');
-    title.textContent = 'How It Works';
+    title.textContent = 'How Simple Appreciation Works';
 
     const desc = document.createElement('p');
     desc.className = 'caption';
-    desc.textContent = 'Three simple steps to receive silent appreciation without opening yourself to harassment.';
+    desc.textContent = 'Three easy steps to spread positive energy and brighten someone\'s day.';
 
     header.appendChild(title);
     header.appendChild(desc);
@@ -825,18 +913,18 @@ export class HalpApp {
     const steps = [
       {
         num: '01',
-        title: 'Claim your handle',
-        desc: 'Generate an anonymous handle starting with "e" linked strictly to your 16-digit client key. No email, password, or phone number required.',
+        title: 'Get your personal link',
+        desc: 'Generate your private appreciation handle in one click with your 16-digit client key. No email, password, or setup hassle required.',
       },
       {
         num: '02',
-        title: 'Share your link or QR',
-        desc: 'Drop your link or SVG badge into your GitHub README, Twitch overlay, Twitter/X bio, or email signature for friends and followers.',
+        title: 'Share with teammates & community',
+        desc: 'Drop your link or SVG badge into your Slack bio, GitHub README, PR template, or email signature for colleagues and supporters.',
       },
       {
         num: '03',
-        title: 'Receive quiet appreciation',
-        desc: 'Aggregated arrival counts arrive silently via Web Push or desktop tray. No unsolicited text, no spam, and no personal exposure.',
+        title: 'Spread & receive genuine joy',
+        desc: 'Send a quiet spark of gratitude to teammates who helped you out. Receive arrival counts silently without any obligation to reply or make small talk.',
       },
     ];
 
@@ -865,7 +953,7 @@ export class HalpApp {
     return section;
   }
 
-  renderSecurityGuarantees(): HTMLElement {
+  renderSafeAndRespectful(): HTMLElement {
     const section = document.createElement('section');
     section.id = 'security';
     section.className = 'security-section';
@@ -874,11 +962,11 @@ export class HalpApp {
     header.className = 'section-header';
 
     const title = document.createElement('h2');
-    title.textContent = 'Privacy & Security Invariants';
+    title.textContent = 'Kindness Protected by Design';
 
     const desc = document.createElement('p');
     desc.className = 'caption';
-    desc.textContent = 'Built so surveillance, identity leaks, and data harvesting are mathematically impossible.';
+    desc.textContent = 'Halp is engineered so appreciation remains pure, joyful, and completely free from noise, pressure, and toxicity.';
 
     header.appendChild(title);
     header.appendChild(desc);
@@ -889,20 +977,20 @@ export class HalpApp {
 
     const items = [
       {
-        title: 'Zero Message Records',
-        desc: 'No message tables, audit logs, or pings stored on disk. The moment a ping is dispatched, it ceases to exist.',
+        title: 'Pure Appreciation Only',
+        desc: 'No message fields, no text comments, and no downvotes. By design, the only thing anyone can ever send is "someone appreciates you".',
       },
       {
-        title: 'Absolute Sender Anonymity',
-        desc: 'Recipients only ever see aggregate arrival numbers. Senders are shielded by rotating Bloom cascades.',
+        title: 'Zero Reply Pressure',
+        desc: 'Traditional messages demand small talk and replies. Halp removes the obligation — recipients feel appreciated without any social debt.',
       },
       {
-        title: 'Client-Side Key Secret',
-        desc: 'Your 16-digit account key never leaves your device. Auth secrets are derived locally with HKDF-SHA256.',
+        title: 'Honest & Free of Politics',
+        desc: 'Senders are completely anonymous. Colleagues and peers can express genuine gratitude freely without feeling performative or awkward.',
       },
       {
-        title: 'Single EU Region & Zero Trackers',
-        desc: 'Hosted strictly in the EU. Zero CDNs, zero cookies, zero web font tracking, and zero analytics scripts.',
+        title: 'Calm & In Control',
+        desc: 'Digest windows, hourly limits, and one-click pausing ensure appreciation brings calm happiness rather than notification fatigue.',
       },
     ];
 
@@ -937,16 +1025,16 @@ export class HalpApp {
     leftCol.className = 'quick-col';
 
     const newH3 = document.createElement('h3');
-    newH3.textContent = 'New to Halp?';
+    newH3.textContent = 'Spread Joy to Someone Today';
 
     const newP = document.createElement('p');
     newP.className = 'caption';
-    newP.textContent = 'Get started in 5 seconds without an email or password. Receive your 16-digit cryptographic key immediately.';
+    newP.textContent = 'Create your private appreciation link in seconds. No email, no password, and no spam.';
 
     const newBtn = document.createElement('button');
     newBtn.type = 'button';
     newBtn.className = 'btn';
-    newBtn.textContent = 'Create New Account';
+    newBtn.textContent = 'Create Your Link';
     newBtn.onclick = () => {
       this.currentKey = generateAccountKey();
       this.currentView = 'key_wall';
@@ -964,11 +1052,11 @@ export class HalpApp {
     rightCol.className = 'quick-col';
 
     const logH3 = document.createElement('h3');
-    logH3.textContent = 'Have an account key?';
+    logH3.textContent = 'Check Your Appreciation';
 
     const logP = document.createElement('p');
     logP.className = 'caption';
-    logP.textContent = 'Enter your 16-digit key to manage your handles and view your appreciation counts.';
+    logP.textContent = 'Enter your 16-digit key to see how many people appreciated you today and manage your handles.';
 
     const form = document.createElement('form');
     form.className = 'form-group';
