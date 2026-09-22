@@ -1,0 +1,22 @@
+{
+  "name": "@halp/core",
+  "version": "0.1.0",
+  "description": "Shared TypeScript API client, key handling, and PoW worker for Halp",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test --experimental-strip-types test/*.test.ts"
+  },
+  "keywords": [
+    "halp",
+    "privacy",
+    "webcrypto"
+  ],
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

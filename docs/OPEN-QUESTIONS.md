@@ -523,3 +523,41 @@ Abuse reporting via `POST /v1/handles/{handle}/report-abuse` resolves the top se
 
 Decided: Public endpoints `GET /h/{handle}` and `GET /@{alias}` serve byte-identical HTML and response headers across existing, nonexistent, paused, and blocked handles (invariant 7: no existence or timing oracle). The page is fully functional without JavaScript via a standard HTML form POST that transitions to a terminal "Sent." state. When JavaScript is present, client-side progressive enhancement holds a 300 ms perceived-latency floor before transitioning the button to "Sent." so that fast drops and accepted pings are indistinguishable to a human observer. The SVG badge at `GET /badge/{handle}.svg` renders a plain static "appreciate me" badge with no counter (decision 8) and immutable long-lived caching.
 
+### 39. Browser extension receiving mechanism → **SSE while popup is open, chrome.alarms polling /v1/pending in background**
+
+Decided: in MV3 browser extensions (`extension/`), the background service worker is terminated by the browser engine after 30 seconds of inactivity, rendering a persistent background SSE connection fragile and power-hostile. Web Push via `chrome.gcm` or `browser.push` introduces inconsistent cross-browser vendor permissions and broad host requirements that jeopardize store review.
+
+The extension therefore uses `web/core` TransportManager in SSE mode while the toolbar popup is open for immediate real-time arrival counts, and registers a periodic alarm (`chrome.alarms` / `browser.alarms`, every 15 minutes) to synchronize today's arrival count from `GET /v1/pending` in the background without holding a connection open.
+
+Reasoning:
+1. Minimizes store review friction: requires only `storage`, `alarms`, and `notifications` permissions with host permissions strictly scoped to the Halp origin (no `<all_urls>` or `tabs`).
+2. Battery and memory efficiency: respects browser lifecycle management for background service workers without maintaining dead TCP streams.
+3. Users who want immediate OS-level push notifications run the web app (Web Push) or the desktop app (continuous SSE).
+
+### 40. Desktop app OS keychain storage and fallback hierarchy → **native OS keychain via Keyring crate, encrypted local config fallback**
+
+Decided: the Tauri desktop application (`desktop/`) stores the 16-digit account key in the operating system's native secure credential store (macOS Keychain Services, Windows Credential Manager, Linux FreeDesktop Secret Service via DBus) using the `keyring` crate.
+
+When the native keychain is unavailable (e.g. headless Linux sessions, CI test environments, or restricted container sandboxes), the client falls back to an encrypted local file in the app data directory (`~/.config/halp/account.enc` or `%APPDATA%\halp\account.enc`), encrypted with AES-256-GCM using a key derived via HKDF from a machine-local seed and a randomized salt. Plaintext storage of the account key on disk is strictly prohibited across all platforms.
+
+### 41. Service worker architecture and cold-start fallback → **payloadless default, scaled copy bands, GET /v1/pending on cold start**
+
+Decided: the Web Push service worker (`web/app/src/sw.ts`) handles push notifications strictly according to `docs/DELIVERY.md` and `docs/UI.md` §8:
+1. Payloadless pushes: render fixed title "Someone appreciates you." with zero body text and zero action buttons immediately, with no network fetch.
+2. Encrypted payloads with `{"n": N}`: parse the integer count $N$ and render the exact copy band ($N=1$: "Someone appreciates you.", $2 \le N \le 20$: "N people appreciate you.", $N \ge 21$: "N people appreciate you.").
+3. Cold start: if the worker awakens with no push payload and no cached local counter state, it falls back to querying `GET /v1/pending` to synchronize the count before displaying the notification.
+4. `pushsubscriptionchange`: automatically re-subscribes using the cached VAPID applicationServerKey and re-registers the new endpoint with `POST /v1/subscriptions`.
+
+### 42. Web Core PoW worker offload, fallback, and epoch token caching → **Web Worker execution with sync fallback, per-epoch token caching**
+
+Decided: Proof of Work grinding in `@halp/core` (`web/core/src/pow.ts`) is executed within an inline Web Worker (`Blob` URL) to ensure zero UI thread latency or frame drops during the ~10 ms send grind or ~1.5 s signup grind. In runtimes lacking Worker support (Node.js unit tests, non-DOM extension contexts), the engine seamlessly falls back to a synchronous optimized JavaScript SHA-256 loop.
+
+Solved tokens (`<epoch>.<nonce>`) are cached in an in-memory map keyed by `(epoch, target, difficulty)`. Because the server enforces rotating 5-minute epochs with $\pm 1$ skew tolerance, ten sends to the same target in a single epoch grind the PoW exactly once, amortizing client CPU overhead to zero for rapid bursts.
+
+### 43. Zero-external-origin client bundle architecture and pure client-side QR generation → **vanilla TypeScript, pure client-side SVG QR matrix, system font stack**
+
+Decided: all client distribution bundles (`web/app/`, `extension/`, `desktop/`) reference strictly zero external origins (no CDNs, no Google Fonts, no external JS/CSS frameworks, no analytics).
+
+QR codes for handle sharing are computed purely client-side in TypeScript via a self-contained Reed-Solomon QR matrix generator producing SVG and PNG data URLs without external API requests or tracking beacons. Styling uses modern CSS custom properties with automatic `prefers-color-scheme` (dark/light) and `prefers-reduced-motion` compliance, achieving full WCAG AA accessibility with 0 external network requests.
+
+
