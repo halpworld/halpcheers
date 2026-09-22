@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Halp</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container" id="app">
+    <!-- Header with Connection Status -->
+    <header>
+      <h1>Halp</h1>
+      <div class="connection-indicator" id="connection-status" aria-live="polite">
+        <span class="connection-dot" id="connection-dot"></span>
+        <span id="connection-text">Connecting...</span>
+      </div>
+    </header>
+
+    <!-- Screen 1: Key Wall (UI.md §2) -->
+    <section id="key-wall" class="card" style="display: none;">
+      <h2>Your Account Key</h2>
+      <p style="color: var(--text-muted); font-size: 0.875rem;">
+        We don't know who you are. This key is the only way back into your account.
+        Keep it somewhere safe: a password manager, a note, a piece of paper.
+      </p>
+
+      <div class="key-box" id="key-display" aria-label="16-digit account key">---- ---- ---- ----</div>
+
+      <label class="checkbox-row">
+        <input type="checkbox" id="key-saved-check">
+        <span>I have saved my key somewhere safe.</span>
+      </label>
+
+      <button id="key-continue-btn" disabled>Continue</button>
+    </section>
+
+    <!-- Screen 2: Home View (UI.md §3) -->
+    <section id="home-view" style="display: none; flex-direction: column; gap: 20px;">
+      <!-- Arrival Counter Card -->
+      <div class="card" aria-live="polite">
+        <div class="counter-label">Today</div>
+        <div class="counter-value" id="today-count">0</div>
+        <div class="counter-label" id="today-caption">No appreciations yet today.</div>
+      </div>
+
+      <!-- Quick Send Form -->
+      <div class="card">
+        <form id="send-form" class="form-group">
+          <label for="target-input">Send appreciation</label>
+          <input
+            type="text"
+            id="target-input"
+            name="target"
+            placeholder="e.g. e0123456789ab or @alias"
+            autocomplete="off"
+            spellcheck="false"
+            required
+          />
+          <button type="submit" id="send-btn">Send</button>
+        </form>
+      </div>
+
+      <!-- Primary Handle Display -->
+      <div class="card" style="font-size: 0.875rem;">
+        <div style="font-weight: 500; margin-bottom: 4px;">Your handle</div>
+        <div id="handle-display" style="font-family: var(--font-mono); color: var(--text-muted); margin-bottom: 12px;">Loading...</div>
+        <button type="button" id="copy-handle-btn" class="button-secondary" style="font-size: 0.8rem; padding: 6px 12px;">Copy Link</button>
+      </div>
+
+      <!-- Logout / Clear Key Button -->
+      <div style="display: flex; justify-content: flex-end;">
+        <button type="button" id="clear-key-btn" class="button-secondary" style="font-size: 0.8rem; color: var(--danger);">Log out</button>
+      </div>
+    </section>
+
+    <!-- ARIA live announcement region -->
+    <div id="aria-announcer" class="sr-only" aria-live="assertive"></div>
+  </div>
+
+  <script type="module" src="dist/app.js"></script>
+</body>
+</html>
