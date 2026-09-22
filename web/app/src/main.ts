@@ -127,7 +127,7 @@ export class HalpApp {
     this.transport = new TransportManager({
       client: this.client,
       events: {
-        onPing: (count) => {
+        onPing: (count: number) => {
           this.todayCount += count;
           this.render();
         },
