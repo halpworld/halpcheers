@@ -462,4 +462,12 @@ tables). When a handle is updated or burned (moved into `burns` table), the reso
 entry is invalidated immediately. In accordance with invariant 8, the cache uses fixed
 memory bounds and cannot be bloated by arbitrary attacker inputs.
 
+### 31. Pair-limit cascaded Bloom filters and count-min sketch dimensions → **cascaded slots with 1 MiB minimum floor, 4x2048 count-min sketch**
+
+Decided: the pair deduplication limit (`server/internal/guard/`) is enforced using a cascade of Bloom filters per 24-hour window, rotated across today and yesterday. Each slot is allocated with a hard 1 MiB floor (`guard.pair.slot_bytes = 1048576`), yielding a false positive probability $< 10^{-6}$ for typical daily ping volumes.
+
+In accordance with `docs/ABUSE.md` § Layer 1, Bloom filter lookup is directional: when an element collides (false positive), the evaluation advances to the next slot. Consequently, a false positive can only ever cost an honest sender quota, never grant an extra ping to an attacker.
+
+Abuse top-sender tracking (Layer 3) utilizes an in-memory Count-Min Sketch sized at depth $d=4$ and width $w=2048$, providing bounded-error frequency estimation with fixed memory footprint (~32 KiB). On explicit `report-abuse`, the top sender is written to the persistent `blocks` table, which is the sole durable record exception under Invariant 1.
+
 
