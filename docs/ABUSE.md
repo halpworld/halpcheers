@@ -44,6 +44,28 @@ is asymmetric by construction — the sender burns CPU, we burn microseconds.
 * Signup PoW is heavier (~1–2 s) because it is once per lifetime, and it is the
   main cost imposed on Sybil farms.
 
+### Difficulty calibration
+
+The required number of leading zero bits `d` corresponds to expected hash count $2^d$.
+Measured on modern mobile and desktop client runtimes (~1.5–2.5M SHA-256 hashes/sec):
+
+| Leading zero bits `d` | Expected hashes | Expected client time | Purpose / Tier |
+|---|---|---|---|
+| 12 | 4,096 | ~2–3 ms | Fast low-power fallback |
+| 13 | 8,192 | ~4–6 ms | Transition tier |
+| **14** | **16,384** | **~10 ms** | **Standard global floor (`pow.floor_ms`)** |
+| 15 | 32,768 | ~20 ms | Minor target elevation |
+| 16 | 65,536 | ~40 ms | Target EWMA warning |
+| 17 | 131,072 | ~80 ms | Moderate target elevation |
+| 18 | 262,144 | ~150 ms | Severe target elevation |
+| 19 | 524,288 | ~300 ms | Heavy throttle |
+| 20 | 1,048,576 | ~600 ms | Sybil brake lower bound |
+| **21** | **2,097,152** | **~1,400 ms (~1.5 s)** | **Signup brake (`pow.signup_ms`)** |
+| 22 | 4,194,304 | ~2.8 s | Aggressive flood deterrence |
+| 23 | 8,388,608 | ~5.5 s | Severe flood mitigation |
+| 24 | 16,777,216 | ~11 s | Attack isolation maximum ceiling |
+
+
 ## Layer 1 — Rate limits
 
 All token buckets, all in memory, all with TTL eviction. Numbers are starting
