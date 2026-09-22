@@ -485,3 +485,11 @@ Decided: the coalesce accumulator (`server/internal/coalesce/`) aggregates incom
 
 Stale jobs older than `dispatch.max_age` (30 s) are dropped on ingress and counted as `obs.DropReasonStale`. The accumulator has a fixed capacity bound (`max_recipients`, default 100,000) satisfying Invariant 8. Expired entries are extracted by the flush loop into `core.Digest` structs carrying only recipient ID and count $N$. The `/v1/pending` endpoint atomically clears and returns the pending count for cold-start and reconnection synchronization.
 
+### 34. Web Push encryption and keypair caching → **in-house RFC 8291/8188 with stdlib crypto, per-subscription shared secret caching with fresh salt per message**
+
+Decided: Web Push encryption is implemented in-house (`server/internal/push/webpush/`) using pure Go stdlib (`crypto/ecdh`, `crypto/hkdf`, `crypto/aes`, `crypto/cipher`, `crypto/ecdsa`, `crypto/rand`) without any third-party dependencies.
+
+To satisfy the dispatch worker pool CPU budget, the ECDH shared secret between the application server and the subscription's `p256dh` public key is cached per subscription endpoint. Benchmark results confirm a 23× speedup: ~1.45 µs per encryption with key cache vs ~33.4 µs without.
+
+Crucially, the 16-byte salt is generated afresh from `crypto/rand` for every single message, strictly preventing AES-GCM nonce reuse under the same CEK. Plaintext pings without count are sent payloadless (zero-byte body, omitting `Content-Encoding`), minimizing bandwidth and processing overhead.
+
