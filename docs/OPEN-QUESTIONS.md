@@ -448,4 +448,18 @@ Reasoning:
 3. A fixed 16-byte domain salt (`"halp-argon2id-v1"`) combined with 64 MiB RAM and 4 threads satisfies RFC 9106 recommended parameters. Rainbow tables are impossible because the input possesses over 53 bits of high-entropy cryptographic randomness from `crypto/rand`. The 64 MiB memory hardness makes offline ASIC/GPU dictionary cracking prohibitively expensive.
 4. On the login endpoint, timing uniformity (AGENTS.md Invariant 7) is strictly preserved: rate-limited attempts and malformed inputs compute a dummy Argon2id hash with the identical parameters before returning, ensuring an attacker cannot distinguish between a non-existent account, bad credentials, and a tripped rate limiter by measuring response latency.
 
+### 30. Handle encoding and resolver LRU cache → **Crockford base32 with 'e' prefix, 60-bit entropy, bounded in-process LRU**
+
+Decided: handles are minted as 13 characters: a fixed region prefix (`e` for `eu-1`)
+followed by 12 characters of lowercase Crockford base32 (`0123456789abcdefghjkmnpqrstvwxyz`,
+excluding `i`, `l`, `o`, `u`). Each character encodes 5 bits, providing 60 bits of
+entropy drawn from `crypto/rand`.
+
+Handle and alias resolution on the ingress path is backed by an in-process thread-safe
+LRU cache (`*region.Resolver`) sized from `config.ResolverCacheSize` (default 100,000 items,
+~16 MB memory footprint). Cache misses fall back to SQLite read queries (`handles` and `aliases`
+tables). When a handle is updated or burned (moved into `burns` table), the resolver LRU
+entry is invalidated immediately. In accordance with invariant 8, the cache uses fixed
+memory bounds and cannot be bloated by arbitrary attacker inputs.
+
 
