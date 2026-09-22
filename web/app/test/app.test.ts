@@ -94,6 +94,12 @@ class MockElement {
   onclick: ((e: any) => void) | null = null;
   oninput: ((e: any) => void) | null = null;
 
+  attributes: Record<string, string> = {};
+
+  setAttribute(name: string, value: string) {
+    this.attributes[name] = value;
+  }
+
   constructor(tagName: string) {
     this.tagName = tagName;
   }
@@ -222,4 +228,51 @@ test('Client-side QR generator produces valid SVG markup without network request
   assert.ok(svg.includes('<svg'), 'valid SVG markup generated');
   assert.ok(svg.includes('viewBox="0 0'), 'valid SVG viewBox');
   assert.ok(svg.includes('<path d="M'), 'valid SVG path');
+});
+
+// -----------------------------------------------------------------------------
+// 6. Landing Page Tests
+// -----------------------------------------------------------------------------
+
+test('Default view for unauthenticated visitor is landing page', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+  assert.strictEqual(app.currentView, 'landing');
+});
+
+test('Landing page renders hero, app showcase, and quick access', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+  app.currentView = 'landing';
+  const element = app.renderLanding() as unknown as MockElement;
+  assert.ok(element !== null);
+  assert.strictEqual(element.className, 'landing-page');
+  assert.ok(element.children.length >= 6, 'Has header, hero, showcase, how it works, security, quick access, and footer');
+});
+
+test('Landing page can navigate to key_wall (register) and login', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+  assert.strictEqual(app.currentView, 'landing');
+
+  // Navigate to register (key wall)
+  app.currentKey = '6421883051974462';
+  app.currentView = 'key_wall';
+  assert.strictEqual(app.currentView, 'key_wall');
+
+  // Navigate to login
+  app.currentView = 'login';
+  assert.strictEqual(app.currentView, 'login');
+});
+
+test('App showcase renders all 5 preview tabs', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+
+  for (let tab = 0; tab < 5; tab++) {
+    app.activePreviewTab = tab;
+    const showcase = app.renderAppShowcase() as unknown as MockElement;
+    assert.ok(showcase !== null);
+    assert.strictEqual(showcase.id, 'showcase');
+  }
 });

@@ -79,13 +79,26 @@ export const COPY = {
     action: 'Appreciate them',
     error: 'Something went wrong. Try again.',
   },
+  landing: {
+    heroTitle: 'Someone appreciates you.',
+    heroSubtitle:
+      'An ultra-lightweight, zero-payload appreciation utility. Send and receive anonymous appreciation pings. No text, no sender identity, no tracking, and no message records — ever.',
+    getStartedBtn: 'Get started — create key',
+    loginBtn: 'Log in with key',
+    pills: [
+      'Zero tracking',
+      'No message records',
+      'Single EU region',
+      '100% Anonymous',
+    ],
+  },
 };
 
-export type AppView = 'key_wall' | 'login' | 'home' | 'settings' | 'share' | 'burn';
+export type AppView = 'landing' | 'key_wall' | 'login' | 'home' | 'settings' | 'share' | 'burn';
 
 export class HalpApp {
   public client: HalpClient;
-  public currentView: AppView = 'home';
+  public currentView: AppView = 'landing';
   public currentKey: string | null = null;
   public handles: HandleDTO[] = [];
   public todayCount = 0;
@@ -93,6 +106,7 @@ export class HalpApp {
   public activeModalHandle: HandleDTO | null = null;
   public transport: TransportManager | null = null;
   public container: HTMLElement;
+  public activePreviewTab = 0;
 
   constructor(container: HTMLElement, client?: HalpClient) {
     this.container = container;
@@ -112,10 +126,8 @@ export class HalpApp {
         this.currentView = 'login';
       }
     } else {
-      // First run: provision account key and show key wall
-      const newKey = generateAccountKey();
-      this.currentKey = newKey;
-      this.currentView = 'key_wall';
+      // First run: show landing page
+      this.currentView = 'landing';
     }
     this.render();
   }
@@ -156,7 +168,7 @@ export class HalpApp {
   render(): void {
     this.container.innerHTML = '';
     const main = document.createElement('main');
-    main.className = 'container';
+    main.className = this.currentView === 'landing' ? 'container landing-container' : 'container';
 
     // Live region for announcements (accessibility)
     const liveRegion = document.createElement('div');
@@ -165,7 +177,9 @@ export class HalpApp {
     liveRegion.setAttribute('aria-live', 'polite');
     main.appendChild(liveRegion);
 
-    if (this.currentView === 'key_wall') {
+    if (this.currentView === 'landing') {
+      main.appendChild(this.renderLanding());
+    } else if (this.currentView === 'key_wall') {
       main.appendChild(this.renderKeyWall());
     } else if (this.currentView === 'login') {
       main.appendChild(this.renderLogin());
@@ -186,6 +200,763 @@ export class HalpApp {
     }
 
     this.container.appendChild(main);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Landing Page Renderer
+  // ---------------------------------------------------------------------------
+
+  renderLanding(): HTMLElement {
+    const landing = document.createElement('div');
+    landing.className = 'landing-page';
+
+    landing.appendChild(this.renderLandingHeader());
+    landing.appendChild(this.renderHero());
+    landing.appendChild(this.renderAppShowcase());
+    landing.appendChild(this.renderHowItWorks());
+    landing.appendChild(this.renderSecurityGuarantees());
+    landing.appendChild(this.renderQuickAccess());
+    landing.appendChild(this.renderLandingFooter());
+
+    return landing;
+  }
+
+  renderLandingHeader(): HTMLElement {
+    const header = document.createElement('header');
+    header.className = 'landing-header';
+
+    const brandGroup = document.createElement('div');
+    brandGroup.className = 'brand-group';
+
+    const brand = document.createElement('span');
+    brand.className = 'brand';
+    brand.textContent = 'halp';
+
+    const tag = document.createElement('span');
+    tag.className = 'brand-subtitle';
+    tag.textContent = 'anonymous appreciation';
+
+    brandGroup.appendChild(brand);
+    brandGroup.appendChild(tag);
+
+    const nav = document.createElement('nav');
+    nav.className = 'landing-nav-links';
+
+    const showcaseLink = document.createElement('a');
+    showcaseLink.href = '#showcase';
+    showcaseLink.textContent = 'Screenshots';
+
+    const howLink = document.createElement('a');
+    howLink.href = '#how-it-works';
+    howLink.textContent = 'How it works';
+
+    const secLink = document.createElement('a');
+    secLink.href = '#security';
+    secLink.textContent = 'Privacy';
+
+    nav.appendChild(showcaseLink);
+    nav.appendChild(howLink);
+    nav.appendChild(secLink);
+
+    const actions = document.createElement('div');
+    actions.className = 'landing-nav-actions';
+
+    const loginBtn = document.createElement('button');
+    loginBtn.type = 'button';
+    loginBtn.className = 'btn btn-secondary';
+    loginBtn.textContent = 'Log In';
+    loginBtn.onclick = () => {
+      this.currentView = 'login';
+      this.render();
+    };
+
+    const registerBtn = document.createElement('button');
+    registerBtn.type = 'button';
+    registerBtn.className = 'btn';
+    registerBtn.textContent = 'Get Started';
+    registerBtn.onclick = () => {
+      this.currentKey = generateAccountKey();
+      this.currentView = 'key_wall';
+      this.render();
+    };
+
+    actions.appendChild(loginBtn);
+    actions.appendChild(registerBtn);
+
+    header.appendChild(brandGroup);
+    header.appendChild(nav);
+    header.appendChild(actions);
+
+    return header;
+  }
+
+  renderHero(): HTMLElement {
+    const hero = document.createElement('section');
+    hero.className = 'hero-section';
+
+    const badges = document.createElement('div');
+    badges.className = 'hero-badges';
+    for (const pill of COPY.landing.pills) {
+      const span = document.createElement('span');
+      span.className = 'badge-pill';
+      span.textContent = pill;
+      badges.appendChild(span);
+    }
+
+    const title = document.createElement('h1');
+    title.className = 'hero-title';
+    title.textContent = COPY.landing.heroTitle;
+
+    const subtitle = document.createElement('p');
+    subtitle.className = 'hero-subtitle';
+    subtitle.textContent = COPY.landing.heroSubtitle;
+
+    const ctaGroup = document.createElement('div');
+    ctaGroup.className = 'hero-cta-group';
+
+    const getStartedBtn = document.createElement('button');
+    getStartedBtn.type = 'button';
+    getStartedBtn.className = 'btn btn-hero';
+    getStartedBtn.textContent = 'Create Account — 1-Click Key';
+    getStartedBtn.onclick = () => {
+      this.currentKey = generateAccountKey();
+      this.currentView = 'key_wall';
+      this.render();
+    };
+
+    const loginBtn = document.createElement('button');
+    loginBtn.type = 'button';
+    loginBtn.className = 'btn btn-secondary btn-hero-secondary';
+    loginBtn.textContent = 'Log In with Account Key';
+    loginBtn.onclick = () => {
+      this.currentView = 'login';
+      this.render();
+    };
+
+    ctaGroup.appendChild(getStartedBtn);
+    ctaGroup.appendChild(loginBtn);
+
+    const heroVisual = document.createElement('div');
+    heroVisual.className = 'hero-visual-card';
+
+    const heroImg = document.createElement('img');
+    heroImg.src = './assets/halp-privacy-shield.jpg';
+    heroImg.alt = 'Halp cryptographic privacy shield';
+    heroImg.className = 'hero-asset-img';
+
+    const heroVisualCaption = document.createElement('div');
+    heroVisualCaption.className = 'hero-visual-caption';
+    heroVisualCaption.textContent = 'Argon2id authentication with zero password, zero email, and zero recovery backdoors.';
+
+    heroVisual.appendChild(heroImg);
+    heroVisual.appendChild(heroVisualCaption);
+
+    hero.appendChild(badges);
+    hero.appendChild(title);
+    hero.appendChild(subtitle);
+    hero.appendChild(ctaGroup);
+    hero.appendChild(heroVisual);
+
+    return hero;
+  }
+
+  renderAppShowcase(): HTMLElement {
+    const section = document.createElement('section');
+    section.id = 'showcase';
+    section.className = 'showcase-section';
+
+    const header = document.createElement('div');
+    header.className = 'section-header';
+
+    const title = document.createElement('h2');
+    title.textContent = 'The Halp Experience';
+
+    const desc = document.createElement('p');
+    desc.className = 'caption';
+    desc.textContent = 'Interactive screenshots of Halp across every interaction — crisp, distraction-free, and respectful of your attention.';
+
+    header.appendChild(title);
+    header.appendChild(desc);
+    section.appendChild(header);
+
+    const tabsContainer = document.createElement('div');
+    tabsContainer.className = 'showcase-tabs';
+    tabsContainer.setAttribute('role', 'tablist');
+
+    const tabDefs = [
+      { id: 0, label: 'Arrival Counter (Home)' },
+      { id: 1, label: 'Appreciation Ping' },
+      { id: 2, label: 'Private Handles & QR' },
+      { id: 3, label: 'Cryptographic Key' },
+      { id: 4, label: 'Quiet Delivery' },
+    ];
+
+    for (const tab of tabDefs) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `tab-btn ${this.activePreviewTab === tab.id ? 'active' : ''}`;
+      btn.textContent = tab.label;
+      btn.onclick = () => {
+        this.activePreviewTab = tab.id;
+        this.render();
+        const el = document.getElementById('showcase');
+        if (el && el.scrollIntoView) {
+          el.scrollIntoView({ behavior: 'auto' });
+        }
+      };
+      tabsContainer.appendChild(btn);
+    }
+    section.appendChild(tabsContainer);
+
+    const windowFrame = document.createElement('div');
+    windowFrame.className = 'mockup-window';
+
+    const winHeader = document.createElement('div');
+    winHeader.className = 'mockup-header';
+
+    const dots = document.createElement('div');
+    dots.className = 'mockup-dots';
+    dots.innerHTML = '<span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>';
+
+    const urlBar = document.createElement('div');
+    urlBar.className = 'mockup-url';
+    const urls = [
+      'https://halp.to/app (Home Dashboard)',
+      'https://halp.to/h/e7k4p2m9qx3va (Recipient Page)',
+      'https://halp.to/share/e7k4p2m9qx3va (QR Generator)',
+      'https://halp.to/account/key (Key Wall)',
+      'https://halp.to/settings (Delivery Controls)',
+    ];
+    urlBar.textContent = urls[this.activePreviewTab] || 'https://halp.to';
+
+    winHeader.appendChild(dots);
+    winHeader.appendChild(urlBar);
+    windowFrame.appendChild(winHeader);
+
+    const winBody = document.createElement('div');
+    winBody.className = 'mockup-body';
+
+    if (this.activePreviewTab === 0) {
+      winBody.appendChild(this.renderMockHome());
+    } else if (this.activePreviewTab === 1) {
+      winBody.appendChild(this.renderMockPing());
+    } else if (this.activePreviewTab === 2) {
+      winBody.appendChild(this.renderMockShare());
+    } else if (this.activePreviewTab === 3) {
+      winBody.appendChild(this.renderMockKeyWall());
+    } else {
+      winBody.appendChild(this.renderMockSettings());
+    }
+
+    windowFrame.appendChild(winBody);
+    section.appendChild(windowFrame);
+
+    return section;
+  }
+
+  renderMockHome(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'mockup-content';
+
+    const countCard = document.createElement('div');
+    countCard.className = 'card';
+    const countTitle = document.createElement('h1');
+    countTitle.textContent = '7 people appreciate you.';
+    countCard.appendChild(countTitle);
+
+    const sendCard = document.createElement('div');
+    sendCard.className = 'card';
+    const sendTitle = document.createElement('h2');
+    sendTitle.textContent = 'Send appreciation';
+
+    const form = document.createElement('div');
+    form.className = 'form-group';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = 'e7k4p2m9qx3va';
+    input.readOnly = true;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = 'Appreciate them';
+    btn.onclick = () => {
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      setTimeout(() => {
+        btn.textContent = 'Sent.';
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.textContent = 'Appreciate them';
+        }, 2000);
+      }, 300);
+    };
+
+    form.appendChild(input);
+    form.appendChild(btn);
+    sendCard.appendChild(sendTitle);
+    sendCard.appendChild(form);
+
+    const handlesCard = document.createElement('div');
+    handlesCard.className = 'card';
+    const handlesTitle = document.createElement('h2');
+    handlesTitle.textContent = 'Your Handles';
+    handlesCard.appendChild(handlesTitle);
+
+    const handleRow = document.createElement('div');
+    handleRow.className = 'handle-item';
+    handleRow.innerHTML = `
+      <div class="handle-item-header">
+        <span class="handle-tag">e7k4p2m9qx3va</span>
+        <span class="handle-kind">personal</span>
+      </div>
+      <div style="font-size:0.9375rem;">GitHub Profile & Bio</div>
+      <div class="button-group">
+        <button type="button" class="btn btn-secondary">Share</button>
+        <button type="button" class="btn btn-secondary">Pause</button>
+      </div>
+    `;
+    handlesCard.appendChild(handleRow);
+
+    wrap.appendChild(countCard);
+    wrap.appendChild(sendCard);
+    wrap.appendChild(handlesCard);
+    return wrap;
+  }
+
+  renderMockPing(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'mockup-content mockup-center';
+
+    const card = document.createElement('div');
+    card.className = 'card mock-ping-card';
+
+    const h1 = document.createElement('h1');
+    h1.textContent = 'Someone appreciates you.';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn';
+    btn.textContent = 'Appreciate them';
+    btn.onclick = () => {
+      btn.disabled = true;
+      btn.textContent = 'Sending...';
+      setTimeout(() => {
+        btn.textContent = 'Sent.';
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.textContent = 'Appreciate them';
+        }, 2000);
+      }, 300);
+    };
+
+    const p = document.createElement('p');
+    p.className = 'caption';
+    p.textContent = 'Anonymous. No message. They never learn it was you.';
+
+    card.appendChild(h1);
+    card.appendChild(btn);
+    card.appendChild(p);
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  renderMockShare(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'mockup-content mockup-center';
+
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const h2 = document.createElement('h2');
+    h2.textContent = 'Share e7k4p2m9qx3va';
+
+    const link = 'https://halp.to/h/e7k4p2m9qx3va';
+    const linkDiv = document.createElement('div');
+    linkDiv.className = 'mock-link-preview';
+    linkDiv.textContent = link;
+
+    const qr = new QRCode(link);
+    const qrDiv = document.createElement('div');
+    qrDiv.style.display = 'flex';
+    qrDiv.style.justifyContent = 'center';
+    qrDiv.style.padding = '0.75rem';
+    qrDiv.innerHTML = qr.toSVG(4);
+    qrDiv.querySelector('svg')?.setAttribute('style', 'max-width: 160px; width: 100%; height: auto;');
+
+    const actions = document.createElement('div');
+    actions.className = 'button-group';
+    actions.innerHTML = `
+      <button type="button" class="btn btn-secondary">Copy Link</button>
+      <button type="button" class="btn btn-secondary">Download QR PNG</button>
+      <button type="button" class="btn btn-secondary">Copy Badge Markdown</button>
+    `;
+
+    card.appendChild(h2);
+    card.appendChild(linkDiv);
+    card.appendChild(qrDiv);
+    card.appendChild(actions);
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  renderMockKeyWall(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'mockup-content mockup-center';
+
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const digitsDiv = document.createElement('div');
+    digitsDiv.className = 'key-wall-digits';
+    digitsDiv.textContent = '6421  8830  5197  4462';
+
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'button-group';
+    btnGroup.innerHTML = `
+      <button type="button" class="btn btn-secondary">Copy</button>
+      <button type="button" class="btn btn-secondary">Download as text</button>
+    `;
+
+    const titleP = document.createElement('p');
+    titleP.style.fontWeight = '600';
+    titleP.textContent = COPY.keyWall.title;
+
+    const subP = document.createElement('p');
+    subP.className = 'caption';
+    subP.textContent = COPY.keyWall.subtitle;
+
+    const checkLabel = document.createElement('label');
+    checkLabel.className = 'checkbox-group';
+    checkLabel.innerHTML = `
+      <input type="checkbox" checked disabled>
+      <span>${COPY.keyWall.checkbox}</span>
+    `;
+
+    const contBtn = document.createElement('button');
+    contBtn.type = 'button';
+    contBtn.className = 'btn';
+    contBtn.textContent = 'Continue';
+
+    card.appendChild(digitsDiv);
+    card.appendChild(btnGroup);
+    card.appendChild(titleP);
+    card.appendChild(subP);
+    card.appendChild(checkLabel);
+    card.appendChild(contBtn);
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  renderMockSettings(): HTMLElement {
+    const wrap = document.createElement('div');
+    wrap.className = 'mockup-content';
+
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const h1 = document.createElement('h1');
+    h1.textContent = 'Settings';
+
+    const disclaimer = document.createElement('div');
+    disclaimer.className = 'notice-box';
+    disclaimer.textContent = COPY.settings.escalationDisclaimer;
+
+    const settingsList = document.createElement('div');
+    settingsList.className = 'mock-settings-list';
+    settingsList.innerHTML = `
+      <div class="mock-setting-row">
+        <div><strong>Digest Window</strong><div class="caption">Batching arrival notifications</div></div>
+        <div class="preset-pill-group">
+          <span class="preset-pill">Instant</span>
+          <span class="preset-pill">Every minute</span>
+          <span class="preset-pill active">Hourly</span>
+          <span class="preset-pill">Daily</span>
+        </div>
+      </div>
+      <div class="mock-setting-row">
+        <div><strong>Delivery Mode</strong><div class="caption">Notification filtering</div></div>
+        <div class="preset-pill-group">
+          <span class="preset-pill active">Everything</span>
+          <span class="preset-pill">Groups only</span>
+          <span class="preset-pill">Paused</span>
+        </div>
+      </div>
+      <div class="mock-setting-row">
+        <div><strong>Max Notifications</strong><div class="caption">Rate limiter threshold</div></div>
+        <div><strong>12 per hour</strong></div>
+      </div>
+    `;
+
+    card.appendChild(h1);
+    card.appendChild(disclaimer);
+    card.appendChild(settingsList);
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  renderHowItWorks(): HTMLElement {
+    const section = document.createElement('section');
+    section.id = 'how-it-works';
+    section.className = 'how-it-works-section';
+
+    const header = document.createElement('div');
+    header.className = 'section-header';
+
+    const title = document.createElement('h2');
+    title.textContent = 'How It Works';
+
+    const desc = document.createElement('p');
+    desc.className = 'caption';
+    desc.textContent = 'Three simple steps to receive silent appreciation without opening yourself to harassment.';
+
+    header.appendChild(title);
+    header.appendChild(desc);
+    section.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'steps-grid';
+
+    const steps = [
+      {
+        num: '01',
+        title: 'Claim your handle',
+        desc: 'Generate an anonymous handle starting with "e" linked strictly to your 16-digit client key. No email, password, or phone number required.',
+      },
+      {
+        num: '02',
+        title: 'Share your link or QR',
+        desc: 'Drop your link or SVG badge into your GitHub README, Twitch overlay, Twitter/X bio, or email signature for friends and followers.',
+      },
+      {
+        num: '03',
+        title: 'Receive quiet appreciation',
+        desc: 'Aggregated arrival counts arrive silently via Web Push or desktop tray. No unsolicited text, no spam, and no personal exposure.',
+      },
+    ];
+
+    for (const s of steps) {
+      const card = document.createElement('div');
+      card.className = 'card step-card';
+
+      const numSpan = document.createElement('span');
+      numSpan.className = 'step-num';
+      numSpan.textContent = s.num;
+
+      const stepTitle = document.createElement('h3');
+      stepTitle.textContent = s.title;
+
+      const stepDesc = document.createElement('p');
+      stepDesc.className = 'caption';
+      stepDesc.textContent = s.desc;
+
+      card.appendChild(numSpan);
+      card.appendChild(stepTitle);
+      card.appendChild(stepDesc);
+      grid.appendChild(card);
+    }
+
+    section.appendChild(grid);
+    return section;
+  }
+
+  renderSecurityGuarantees(): HTMLElement {
+    const section = document.createElement('section');
+    section.id = 'security';
+    section.className = 'security-section';
+
+    const header = document.createElement('div');
+    header.className = 'section-header';
+
+    const title = document.createElement('h2');
+    title.textContent = 'Privacy & Security Invariants';
+
+    const desc = document.createElement('p');
+    desc.className = 'caption';
+    desc.textContent = 'Built so surveillance, identity leaks, and data harvesting are mathematically impossible.';
+
+    header.appendChild(title);
+    header.appendChild(desc);
+    section.appendChild(header);
+
+    const grid = document.createElement('div');
+    grid.className = 'security-grid';
+
+    const items = [
+      {
+        title: 'Zero Message Records',
+        desc: 'No message tables, audit logs, or pings stored on disk. The moment a ping is dispatched, it ceases to exist.',
+      },
+      {
+        title: 'Absolute Sender Anonymity',
+        desc: 'Recipients only ever see aggregate arrival numbers. Senders are shielded by rotating Bloom cascades.',
+      },
+      {
+        title: 'Client-Side Key Secret',
+        desc: 'Your 16-digit account key never leaves your device. Auth secrets are derived locally with HKDF-SHA256.',
+      },
+      {
+        title: 'Single EU Region & Zero Trackers',
+        desc: 'Hosted strictly in the EU. Zero CDNs, zero cookies, zero web font tracking, and zero analytics scripts.',
+      },
+    ];
+
+    for (const item of items) {
+      const card = document.createElement('div');
+      card.className = 'card security-card';
+
+      const itemTitle = document.createElement('h3');
+      itemTitle.textContent = item.title;
+
+      const itemDesc = document.createElement('p');
+      itemDesc.className = 'caption';
+      itemDesc.textContent = item.desc;
+
+      card.appendChild(itemTitle);
+      card.appendChild(itemDesc);
+      grid.appendChild(card);
+    }
+
+    section.appendChild(grid);
+    return section;
+  }
+
+  renderQuickAccess(): HTMLElement {
+    const section = document.createElement('section');
+    section.className = 'quick-access-section';
+
+    const card = document.createElement('div');
+    card.className = 'card quick-access-card';
+
+    const leftCol = document.createElement('div');
+    leftCol.className = 'quick-col';
+
+    const newH3 = document.createElement('h3');
+    newH3.textContent = 'New to Halp?';
+
+    const newP = document.createElement('p');
+    newP.className = 'caption';
+    newP.textContent = 'Get started in 5 seconds without an email or password. Receive your 16-digit cryptographic key immediately.';
+
+    const newBtn = document.createElement('button');
+    newBtn.type = 'button';
+    newBtn.className = 'btn';
+    newBtn.textContent = 'Create New Account';
+    newBtn.onclick = () => {
+      this.currentKey = generateAccountKey();
+      this.currentView = 'key_wall';
+      this.render();
+    };
+
+    leftCol.appendChild(newH3);
+    leftCol.appendChild(newP);
+    leftCol.appendChild(newBtn);
+
+    const divider = document.createElement('div');
+    divider.className = 'quick-divider';
+
+    const rightCol = document.createElement('div');
+    rightCol.className = 'quick-col';
+
+    const logH3 = document.createElement('h3');
+    logH3.textContent = 'Have an account key?';
+
+    const logP = document.createElement('p');
+    logP.className = 'caption';
+    logP.textContent = 'Enter your 16-digit key to manage your handles and view your appreciation counts.';
+
+    const form = document.createElement('form');
+    form.className = 'form-group';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = 19;
+    input.placeholder = '6421 8830 5197 4462';
+    input.oninput = () => {
+      const clean = input.value.replace(/\D/g, '').slice(0, 16);
+      input.value = formatAccountKey(clean);
+    };
+
+    const errDiv = document.createElement('div');
+    errDiv.style.color = 'var(--danger)';
+    errDiv.style.fontSize = '0.875rem';
+    errDiv.style.display = 'none';
+
+    const logSubmit = document.createElement('button');
+    logSubmit.type = 'submit';
+    logSubmit.className = 'btn btn-secondary';
+    logSubmit.textContent = 'Log In with Key';
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      errDiv.style.display = 'none';
+      const clean = input.value.replace(/\s+/g, '');
+      if (!isAccountKeyShaped(clean)) {
+        errDiv.textContent = COPY.login.failure;
+        errDiv.style.display = 'block';
+        return;
+      }
+      logSubmit.disabled = true;
+      try {
+        await this.client.loginWithAccountKey(clean);
+        await storeAccountKey(clean);
+        this.currentKey = clean;
+        await this.loadData();
+        this.currentView = 'home';
+        this.initTransport();
+        this.render();
+      } catch {
+        errDiv.textContent = COPY.login.failure;
+        errDiv.style.display = 'block';
+        logSubmit.disabled = false;
+      }
+    };
+
+    form.appendChild(input);
+    form.appendChild(errDiv);
+    form.appendChild(logSubmit);
+
+    rightCol.appendChild(logH3);
+    rightCol.appendChild(logP);
+    rightCol.appendChild(form);
+
+    card.appendChild(leftCol);
+    card.appendChild(divider);
+    card.appendChild(rightCol);
+    section.appendChild(card);
+
+    return section;
+  }
+
+  renderLandingFooter(): HTMLElement {
+    const footer = document.createElement('footer');
+    footer.className = 'landing-footer';
+
+    const topDiv = document.createElement('div');
+    topDiv.className = 'footer-top';
+
+    const brandDiv = document.createElement('div');
+    brandDiv.innerHTML = '<strong>halp</strong> — Someone appreciates you.';
+
+    const linksDiv = document.createElement('div');
+    linksDiv.className = 'footer-links';
+    linksDiv.innerHTML = `
+      <a href="https://halp.to/github">GitHub</a>
+      <a href="./docs/API.md">API</a>
+      <a href="./docs/ARCHITECTURE.md">Architecture</a>
+      <a href="./docs/PRIVACY.md">Privacy Policy</a>
+    `;
+
+    topDiv.appendChild(brandDiv);
+    topDiv.appendChild(linksDiv);
+
+    const bottomDiv = document.createElement('div');
+    bottomDiv.className = 'footer-bottom caption';
+    bottomDiv.textContent = 'Open source under Apache-2.0. Single EU region (eu-1). Zero trackers, zero cookies.';
+
+    footer.appendChild(topDiv);
+    footer.appendChild(bottomDiv);
+    return footer;
   }
 
   renderHeader(): HTMLElement {
@@ -220,6 +991,16 @@ export class HalpApp {
   renderKeyWall(): HTMLElement {
     const card = document.createElement('div');
     card.className = 'card';
+
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'btn btn-secondary';
+    backBtn.textContent = '← Back to overview';
+    backBtn.style.alignSelf = 'flex-start';
+    backBtn.onclick = () => {
+      this.currentView = 'landing';
+      this.render();
+    };
 
     const digitsDiv = document.createElement('div');
     digitsDiv.className = 'key-wall-digits';
@@ -321,6 +1102,16 @@ export class HalpApp {
   renderLogin(): HTMLElement {
     const card = document.createElement('div');
     card.className = 'card';
+
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'btn btn-secondary';
+    backBtn.textContent = '← Back to overview';
+    backBtn.style.alignSelf = 'flex-start';
+    backBtn.onclick = () => {
+      this.currentView = 'landing';
+      this.render();
+    };
 
     const h1 = document.createElement('h1');
     h1.textContent = 'Log in';
@@ -812,6 +1603,42 @@ export class HalpApp {
     card.appendChild(h1);
     card.appendChild(disclaimer);
     card.appendChild(form);
+
+    // Account Actions
+    const accountActions = document.createElement('div');
+    accountActions.className = 'button-group';
+    accountActions.style.marginTop = '1rem';
+    accountActions.style.borderTop = '1px solid var(--border)';
+    accountActions.style.paddingTop = '1rem';
+
+    const viewKeyBtn = document.createElement('button');
+    viewKeyBtn.type = 'button';
+    viewKeyBtn.className = 'btn btn-secondary';
+    viewKeyBtn.textContent = 'View Account Key';
+    viewKeyBtn.onclick = () => {
+      this.currentView = 'key_wall';
+      this.render();
+    };
+
+    const logoutBtn = document.createElement('button');
+    logoutBtn.type = 'button';
+    logoutBtn.className = 'btn btn-secondary';
+    logoutBtn.textContent = 'Log out (Disconnect key)';
+    logoutBtn.onclick = async () => {
+      await clearAccountKey();
+      this.currentKey = null;
+      if (this.transport) {
+        this.transport.close();
+        this.transport = null;
+      }
+      this.currentView = 'landing';
+      this.render();
+    };
+
+    accountActions.appendChild(viewKeyBtn);
+    accountActions.appendChild(logoutBtn);
+    card.appendChild(accountActions);
+
     return card;
   }
 }
