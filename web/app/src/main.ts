@@ -107,6 +107,7 @@ export class HalpApp {
   public transport: TransportManager | null = null;
   public container: HTMLElement;
   public activePreviewTab = 0;
+  public isMobileMenuOpen = false;
 
   constructor(container: HTMLElement, client?: HalpClient) {
     this.container = container;
@@ -121,6 +122,28 @@ export class HalpApp {
 
     if (typeof window !== 'undefined') {
       window.addEventListener('hashchange', () => this.handleHashChange());
+      window.addEventListener('resize', () => {
+        if (window.innerWidth > 860 && this.isMobileMenuOpen) {
+          this.toggleMobileMenu(false);
+        }
+      });
+      window.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && this.isMobileMenuOpen) {
+          this.toggleMobileMenu(false);
+          const toggleBtn = this.container.querySelector('#mobile-menu-toggle') as HTMLElement | null;
+          if (toggleBtn && typeof toggleBtn.focus === 'function') {
+            toggleBtn.focus();
+          }
+        }
+      });
+      window.addEventListener('click', (e: MouseEvent) => {
+        if (this.isMobileMenuOpen) {
+          const header = this.container.querySelector('.landing-header');
+          if (header && typeof header.contains === 'function' && !header.contains(e.target as Node)) {
+            this.toggleMobileMenu(false);
+          }
+        }
+      });
     }
 
     const hash = typeof window !== 'undefined' ? window.location.hash : '';
@@ -148,10 +171,21 @@ export class HalpApp {
     }
 
     this.render();
+
+    const landingSections = ['#why-it-matters', '#showcase', '#how-it-works', '#security'];
+    if (landingSections.includes(hash)) {
+      this.navigateToSection(hash);
+    }
   }
 
   handleHashChange(): void {
     const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    const landingSections = ['#why-it-matters', '#showcase', '#how-it-works', '#security'];
+    if (this.currentView === 'landing' && landingSections.includes(hash)) {
+      this.navigateToSection(hash);
+      return;
+    }
+
     if (hash === '#app' || hash === '#home') {
       if (this.currentKey) {
         this.currentView = 'home';
@@ -167,6 +201,56 @@ export class HalpApp {
       this.currentView = 'landing';
     }
     this.render();
+  }
+
+  toggleMobileMenu(open?: boolean): void {
+    this.isMobileMenuOpen = open !== undefined ? open : !this.isMobileMenuOpen;
+    const menu = this.container.querySelector('#landing-mobile-menu') as HTMLElement | null;
+    const toggleBtn = this.container.querySelector('#mobile-menu-toggle') as HTMLElement | null;
+    if (menu && toggleBtn) {
+      if (this.isMobileMenuOpen) {
+        menu.className = 'landing-mobile-menu open';
+        menu.setAttribute('aria-hidden', 'false');
+        toggleBtn.setAttribute('aria-expanded', 'true');
+        toggleBtn.innerHTML = `
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        `;
+      } else {
+        menu.className = 'landing-mobile-menu';
+        menu.setAttribute('aria-hidden', 'true');
+        toggleBtn.setAttribute('aria-expanded', 'false');
+        toggleBtn.innerHTML = `
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+          </svg>
+        `;
+      }
+    }
+  }
+
+  navigateToSection(sectionId: string): void {
+    if (this.isMobileMenuOpen) {
+      this.toggleMobileMenu(false);
+    }
+    if (this.currentView !== 'landing') {
+      this.currentView = 'landing';
+      this.render();
+    }
+    const cleanId = sectionId.replace(/^#/, '');
+    if (typeof document !== 'undefined') {
+      const target = document.getElementById ? document.getElementById(cleanId) : null;
+      if (target && 'scrollIntoView' in target) {
+        target.scrollIntoView({ behavior: 'smooth' });
+        if (typeof window !== 'undefined' && window.history?.pushState) {
+          window.history.pushState(null, '', `#${cleanId}`);
+        }
+      }
+    }
   }
 
   private initTransport(): void {
@@ -267,6 +351,10 @@ export class HalpApp {
     const header = document.createElement('header');
     header.className = 'landing-header';
 
+    const headerBar = document.createElement('div');
+    headerBar.className = 'landing-header-bar';
+
+    // 1. Brand Group
     const brandGroup = document.createElement('div');
     brandGroup.className = 'brand-group';
 
@@ -274,6 +362,20 @@ export class HalpApp {
     brand.href = '#';
     brand.className = 'brand brand-link';
     brand.innerHTML = '<span class="brand-spark">💛</span> <span class="brand-text">halp</span>';
+    brand.onclick = (e) => {
+      e.preventDefault();
+      if (this.currentView === 'landing') {
+        if (typeof window !== 'undefined') {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+          if (window.history?.pushState) window.history.pushState(null, '', ' ');
+        }
+        if (this.isMobileMenuOpen) this.toggleMobileMenu(false);
+      } else {
+        this.currentView = 'landing';
+        if (typeof window !== 'undefined') window.location.hash = '';
+        this.render();
+      }
+    };
 
     const tag = document.createElement('span');
     tag.className = 'brand-subtitle';
@@ -282,39 +384,44 @@ export class HalpApp {
     brandGroup.appendChild(brand);
     brandGroup.appendChild(tag);
 
+    // 2. Desktop Nav Links
     const nav = document.createElement('nav');
     nav.className = 'landing-nav-links';
+    nav.setAttribute('aria-label', 'Main Navigation');
 
-    const whyLink = document.createElement('a');
-    whyLink.href = '#why-it-matters';
-    whyLink.textContent = 'Why Halp';
+    const sections = [
+      { id: 'why-it-matters', label: 'Why Halp' },
+      { id: 'showcase', label: 'The Experience' },
+      { id: 'how-it-works', label: 'How It Works' },
+      { id: 'security', label: 'Privacy & Care' },
+    ];
 
-    const showcaseLink = document.createElement('a');
-    showcaseLink.href = '#showcase';
-    showcaseLink.textContent = 'The Experience';
+    for (const sec of sections) {
+      const link = document.createElement('a');
+      link.href = `#${sec.id}`;
+      link.textContent = sec.label;
+      link.onclick = (e) => {
+        e.preventDefault();
+        this.navigateToSection(sec.id);
+      };
+      nav.appendChild(link);
+    }
 
-    const howLink = document.createElement('a');
-    howLink.href = '#how-it-works';
-    howLink.textContent = 'How It Works';
-
-    const secLink = document.createElement('a');
-    secLink.href = '#security';
-    secLink.textContent = 'Privacy & Care';
-
-    nav.appendChild(whyLink);
-    nav.appendChild(showcaseLink);
-    nav.appendChild(howLink);
-    nav.appendChild(secLink);
-
+    // 3. Desktop Action Buttons
     const actions = document.createElement('div');
     actions.className = 'landing-nav-actions';
 
+    // 4. Mobile Controls (Primary CTA + Hamburger Toggle)
+    const mobileControls = document.createElement('div');
+    mobileControls.className = 'landing-mobile-controls';
+
     if (this.currentKey) {
-      const loginBtn = document.createElement('button');
-      loginBtn.type = 'button';
-      loginBtn.className = 'btn btn-secondary btn-nav';
-      loginBtn.textContent = 'Switch Account';
-      loginBtn.onclick = () => {
+      // Desktop actions (Logged in)
+      const switchBtn = document.createElement('button');
+      switchBtn.type = 'button';
+      switchBtn.className = 'btn btn-secondary btn-nav';
+      switchBtn.textContent = 'Switch Account';
+      switchBtn.onclick = () => {
         this.currentView = 'login';
         if (typeof window !== 'undefined') window.location.hash = '#login';
         this.render();
@@ -337,9 +444,29 @@ export class HalpApp {
         this.render();
       };
 
-      actions.appendChild(loginBtn);
+      actions.appendChild(switchBtn);
       actions.appendChild(appBtn);
+
+      // Mobile Primary Action Button
+      const mobileAppBtn = document.createElement('button');
+      mobileAppBtn.type = 'button';
+      mobileAppBtn.className = 'btn btn-nav btn-nav-mobile-primary';
+      mobileAppBtn.textContent = 'Dashboard →';
+      mobileAppBtn.onclick = async () => {
+        try {
+          await this.client.loginWithAccountKey(this.currentKey!);
+          await this.loadData();
+          this.currentView = 'home';
+          this.initTransport();
+        } catch {
+          this.currentView = 'home';
+        }
+        if (typeof window !== 'undefined') window.location.hash = '#app';
+        this.render();
+      };
+      mobileControls.appendChild(mobileAppBtn);
     } else {
+      // Desktop actions (Unauthenticated)
       const loginBtn = document.createElement('button');
       loginBtn.type = 'button';
       loginBtn.className = 'btn btn-secondary btn-nav';
@@ -363,11 +490,103 @@ export class HalpApp {
 
       actions.appendChild(loginBtn);
       actions.appendChild(registerBtn);
+
+      // Mobile Primary Action Button
+      const mobileRegisterBtn = document.createElement('button');
+      mobileRegisterBtn.type = 'button';
+      mobileRegisterBtn.className = 'btn btn-nav btn-nav-mobile-primary';
+      mobileRegisterBtn.textContent = 'Get Started';
+      mobileRegisterBtn.onclick = () => {
+        this.currentKey = generateAccountKey();
+        this.currentView = 'key_wall';
+        if (typeof window !== 'undefined') window.location.hash = '#register';
+        this.render();
+      };
+      mobileControls.appendChild(mobileRegisterBtn);
     }
 
-    header.appendChild(brandGroup);
-    header.appendChild(nav);
-    header.appendChild(actions);
+    // Hamburger button
+    const toggleBtn = document.createElement('button');
+    toggleBtn.type = 'button';
+    toggleBtn.id = 'mobile-menu-toggle';
+    toggleBtn.className = 'btn-icon mobile-menu-toggle';
+    toggleBtn.setAttribute('aria-label', 'Toggle navigation menu');
+    toggleBtn.setAttribute('aria-expanded', this.isMobileMenuOpen ? 'true' : 'false');
+    toggleBtn.setAttribute('aria-controls', 'landing-mobile-menu');
+    toggleBtn.innerHTML = this.isMobileMenuOpen
+      ? `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`
+      : `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>`;
+
+    toggleBtn.onclick = () => {
+      this.toggleMobileMenu();
+    };
+
+    mobileControls.appendChild(toggleBtn);
+
+    headerBar.appendChild(brandGroup);
+    headerBar.appendChild(nav);
+    headerBar.appendChild(actions);
+    headerBar.appendChild(mobileControls);
+    header.appendChild(headerBar);
+
+    // 5. Mobile Drawer Menu
+    const mobileMenu = document.createElement('div');
+    mobileMenu.id = 'landing-mobile-menu';
+    mobileMenu.className = this.isMobileMenuOpen ? 'landing-mobile-menu open' : 'landing-mobile-menu';
+    mobileMenu.setAttribute('aria-hidden', this.isMobileMenuOpen ? 'false' : 'true');
+
+    const mobileNavList = document.createElement('nav');
+    mobileNavList.className = 'mobile-nav-list';
+    mobileNavList.setAttribute('aria-label', 'Mobile Navigation');
+
+    for (const sec of sections) {
+      const link = document.createElement('a');
+      link.href = `#${sec.id}`;
+      link.className = 'mobile-nav-link';
+      link.innerHTML = `<span>${sec.label}</span><span class="mobile-nav-arrow" aria-hidden="true">›</span>`;
+      link.onclick = (e) => {
+        e.preventDefault();
+        this.navigateToSection(sec.id);
+      };
+      mobileNavList.appendChild(link);
+    }
+
+    const divider = document.createElement('div');
+    divider.className = 'mobile-menu-divider';
+
+    const mobileActions = document.createElement('div');
+    mobileActions.className = 'mobile-menu-actions';
+
+    if (this.currentKey) {
+      const switchBtn = document.createElement('button');
+      switchBtn.type = 'button';
+      switchBtn.className = 'btn btn-secondary mobile-action-btn';
+      switchBtn.textContent = 'Switch Account';
+      switchBtn.onclick = () => {
+        this.toggleMobileMenu(false);
+        this.currentView = 'login';
+        if (typeof window !== 'undefined') window.location.hash = '#login';
+        this.render();
+      };
+      mobileActions.appendChild(switchBtn);
+    } else {
+      const loginBtn = document.createElement('button');
+      loginBtn.type = 'button';
+      loginBtn.className = 'btn btn-secondary mobile-action-btn';
+      loginBtn.textContent = 'Log In with Key';
+      loginBtn.onclick = () => {
+        this.toggleMobileMenu(false);
+        this.currentView = 'login';
+        if (typeof window !== 'undefined') window.location.hash = '#login';
+        this.render();
+      };
+      mobileActions.appendChild(loginBtn);
+    }
+
+    mobileMenu.appendChild(mobileNavList);
+    mobileMenu.appendChild(divider);
+    mobileMenu.appendChild(mobileActions);
+    header.appendChild(mobileMenu);
 
     return header;
   }
@@ -1173,23 +1392,27 @@ export class HalpApp {
     const header = document.createElement('header');
     header.className = 'app-header';
 
-    const brand = document.createElement('div');
-    brand.className = 'brand';
-    brand.textContent = 'halp';
+    const brand = document.createElement('a');
+    brand.href = '#';
+    brand.className = 'brand brand-link';
+    brand.innerHTML = '<span class="brand-spark">💛</span> <span class="brand-text">halp</span>';
     brand.style.cursor = 'pointer';
     brand.title = 'Back to Landing Page';
-    brand.onclick = () => {
+    brand.onclick = (e) => {
+      e.preventDefault();
       this.currentView = 'landing';
       if (typeof window !== 'undefined') window.location.hash = '';
       this.render();
     };
 
     const nav = document.createElement('nav');
-    nav.className = 'nav-links';
+    nav.className = 'nav-links app-nav-links';
+    nav.setAttribute('aria-label', 'App Navigation');
 
     const landingLink = document.createElement('a');
     landingLink.href = '#';
     landingLink.textContent = 'Overview';
+    if (this.currentView === 'landing') landingLink.className = 'active';
     landingLink.onclick = (e) => {
       e.preventDefault();
       this.currentView = 'landing';
@@ -1198,8 +1421,9 @@ export class HalpApp {
     };
 
     const homeLink = document.createElement('a');
-    homeLink.href = '#';
+    homeLink.href = '#app';
     homeLink.textContent = 'Home';
+    if (this.currentView === 'home') homeLink.className = 'active';
     homeLink.onclick = (e) => {
       e.preventDefault();
       this.currentView = 'home';
@@ -1208,8 +1432,9 @@ export class HalpApp {
     };
 
     const settingsLink = document.createElement('a');
-    settingsLink.href = '#';
+    settingsLink.href = '#settings';
     settingsLink.textContent = 'Settings';
+    if (this.currentView === 'settings') settingsLink.className = 'active';
     settingsLink.onclick = (e) => {
       e.preventDefault();
       this.currentView = 'settings';

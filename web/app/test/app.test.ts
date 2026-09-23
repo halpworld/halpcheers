@@ -100,6 +100,10 @@ class MockElement {
     this.attributes[name] = value;
   }
 
+  getAttribute(name: string): string | null {
+    return this.attributes[name] ?? null;
+  }
+
   constructor(tagName: string) {
     this.tagName = tagName;
   }
@@ -113,6 +117,14 @@ class MockElement {
     if (selector.startsWith('#')) {
       const targetId = selector.slice(1);
       if (this.id === targetId) return this;
+      for (const c of this.children) {
+        const found = c.querySelector(selector);
+        if (found) return found;
+      }
+    }
+    if (selector.startsWith('.')) {
+      const targetClass = selector.slice(1);
+      if (this.className.split(/\s+/).includes(targetClass)) return this;
       for (const c of this.children) {
         const found = c.querySelector(selector);
         if (found) return found;
@@ -292,4 +304,95 @@ test('Landing page theme features friendly, caring, happy design tokens', () => 
   assert.ok(css.includes('--surface-warm'), 'Warm surface layer defined');
   assert.ok(css.includes('--bg: #1c1817'), 'Cozy midnight hearth dark background');
   assert.ok(css.includes('--accent: #f27854'), 'Cozy peach coral dark accent');
+});
+
+// -----------------------------------------------------------------------------
+// 7. Responsive Header & Mobile Menu Tests
+// -----------------------------------------------------------------------------
+
+test('Landing header renders responsive bar and accessible mobile menu toggle', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+  app.currentView = 'landing';
+  app.render();
+
+  const toggleBtn = (mockContainer as unknown as MockElement).querySelector('#mobile-menu-toggle');
+  assert.ok(toggleBtn !== null, 'Mobile menu toggle button exists');
+  assert.strictEqual(toggleBtn.getAttribute('aria-label'), 'Toggle navigation menu');
+  assert.strictEqual(toggleBtn.getAttribute('aria-expanded'), 'false');
+  assert.strictEqual(toggleBtn.getAttribute('aria-controls'), 'landing-mobile-menu');
+
+  const mobileMenu = (mockContainer as unknown as MockElement).querySelector('#landing-mobile-menu');
+  assert.ok(mobileMenu !== null, 'Mobile menu drawer exists');
+  assert.strictEqual(mobileMenu.getAttribute('aria-hidden'), 'true');
+  assert.strictEqual(mobileMenu.className, 'landing-mobile-menu');
+});
+
+test('Mobile menu toggle updates state and accessibility attributes', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+  app.currentView = 'landing';
+  app.render();
+
+  assert.strictEqual(app.isMobileMenuOpen, false);
+
+  // Open mobile menu
+  app.toggleMobileMenu(true);
+  assert.strictEqual(app.isMobileMenuOpen, true);
+
+  const openToggleBtn = (mockContainer as unknown as MockElement).querySelector('#mobile-menu-toggle');
+  const openMobileMenu = (mockContainer as unknown as MockElement).querySelector('#landing-mobile-menu');
+  assert.strictEqual(openToggleBtn?.getAttribute('aria-expanded'), 'true');
+  assert.strictEqual(openMobileMenu?.getAttribute('aria-hidden'), 'false');
+  assert.strictEqual(openMobileMenu?.className, 'landing-mobile-menu open');
+
+  // Close mobile menu
+  app.toggleMobileMenu(false);
+  assert.strictEqual(app.isMobileMenuOpen, false);
+  assert.strictEqual(openToggleBtn?.getAttribute('aria-expanded'), 'false');
+  assert.strictEqual(openMobileMenu?.getAttribute('aria-hidden'), 'true');
+  assert.strictEqual(openMobileMenu?.className, 'landing-mobile-menu');
+});
+
+test('Section navigation closes mobile menu if open', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+  app.currentView = 'landing';
+  app.render();
+
+  app.toggleMobileMenu(true);
+  assert.strictEqual(app.isMobileMenuOpen, true);
+
+  app.navigateToSection('how-it-works');
+  assert.strictEqual(app.isMobileMenuOpen, false);
+});
+
+test('App header highlights the active view', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+
+  app.currentView = 'home';
+  const homeHeader = app.renderHeader() as unknown as MockElement;
+  const activeHomeLink = homeHeader.querySelector('.active');
+  assert.ok(activeHomeLink !== null);
+  assert.strictEqual(activeHomeLink.textContent, 'Home');
+
+  app.currentView = 'settings';
+  const settingsHeader = app.renderHeader() as unknown as MockElement;
+  const activeSettingsLink = settingsHeader.querySelector('.active');
+  assert.ok(activeSettingsLink !== null);
+  assert.strictEqual(activeSettingsLink.textContent, 'Settings');
+});
+
+test('Responsive media queries and smooth scrolling defined in stylesheet', () => {
+  const cssPath = path.resolve(import.meta.dirname, '../src/styles.css');
+  const css = fs.readFileSync(cssPath, 'utf8');
+
+  assert.ok(css.includes('scroll-behavior: smooth'), 'Smooth scrolling enabled on html');
+  assert.ok(css.includes('@media (max-width: 860px)'), 'Tablet breakpoint defined');
+  assert.ok(css.includes('@media (max-width: 640px)'), 'Mobile breakpoint defined');
+  assert.ok(css.includes('@media (max-width: 380px)'), 'Small mobile breakpoint defined');
+  assert.ok(css.includes('.landing-mobile-menu'), 'Mobile drawer styles defined');
+  assert.ok(css.includes('.mobile-menu-toggle'), 'Mobile toggle styles defined');
+  assert.ok(css.includes('.btn-nav-mobile-primary'), 'Mobile primary CTA styled');
 });
