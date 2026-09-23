@@ -389,6 +389,7 @@ test('Responsive media queries and smooth scrolling defined in stylesheet', () =
   const css = fs.readFileSync(cssPath, 'utf8');
 
   assert.ok(css.includes('scroll-behavior: smooth'), 'Smooth scrolling enabled on html');
+  assert.ok(css.includes('@media (max-width: 1040px)'), 'Navigation collapse breakpoint defined');
   assert.ok(css.includes('@media (max-width: 860px)'), 'Tablet breakpoint defined');
   assert.ok(css.includes('@media (max-width: 640px)'), 'Mobile breakpoint defined');
   assert.ok(css.includes('@media (max-width: 380px)'), 'Small mobile breakpoint defined');

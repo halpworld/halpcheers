@@ -456,7 +456,7 @@ select:focus {
    ========================================================================== */
 
 .landing-container {
-  max-width: 980px;
+  max-width: 1080px;
   width: 100%;
   padding: 1.5rem 1.25rem 4.5rem 1.25rem;
   box-sizing: border-box;
@@ -486,7 +486,7 @@ select:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.65rem 1.25rem;
+  padding: 0.55rem 1.15rem;
   background: rgba(253, 250, 246, 0.92);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -550,14 +550,14 @@ select:focus {
 .landing-nav-links {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.25rem;
 }
 
 .landing-nav-links a {
   color: var(--text-muted);
-  font-size: 0.875rem;
+  font-size: 0.85rem;
   font-weight: 550;
-  padding: 0.4rem 0.85rem;
+  padding: 0.35rem 0.65rem;
   border-radius: 9999px;
   transition: all 0.15s ease;
   text-decoration: none;
@@ -578,8 +578,8 @@ select:focus {
 }
 
 .btn-nav {
-  padding: 0.45rem 1.15rem;
-  font-size: 0.875rem;
+  padding: 0.4rem 0.95rem;
+  font-size: 0.825rem;
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1342,13 +1342,13 @@ select:focus {
    Responsive Breakpoints
    ========================================================================== */
 
-@media (max-width: 960px) {
+@media (max-width: 1180px) {
   .brand-subtitle {
     display: none;
   }
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1040px) {
   .landing-header {
     top: 0.5rem;
   }
@@ -1368,7 +1368,9 @@ select:focus {
   .landing-mobile-controls {
     display: flex;
   }
+}
 
+@media (max-width: 860px) {
   .quick-access-card {
     grid-template-columns: 1fr;
     gap: 1.75rem;

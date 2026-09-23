@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Halp — Someone appreciates you.</title>
   <meta name="description" content="Send a person an anonymous 'someone appreciates you' ping. Nothing else, ever.">
-  <link rel="stylesheet" href="./src/styles.css">
+  <link rel="stylesheet" href="./src/styles.css?v=2">
   <script type="importmap">
     {
       "imports": {
@@ -17,7 +17,7 @@
 <body>
   <div id="app"></div>
   <script type="module">
-    import { HalpApp } from './dist/main.js';
+    import { HalpApp } from './dist/main.js?v=2';
     const container = document.getElementById('app');
     if (container) {
       const app = new HalpApp(container);

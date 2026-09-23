@@ -123,7 +123,7 @@ export class HalpApp {
     if (typeof window !== 'undefined') {
       window.addEventListener('hashchange', () => this.handleHashChange());
       window.addEventListener('resize', () => {
-        if (window.innerWidth > 860 && this.isMobileMenuOpen) {
+        if (window.innerWidth > 1040 && this.isMobileMenuOpen) {
           this.toggleMobileMenu(false);
         }
       });
