@@ -270,13 +270,14 @@ export class HalpApp {
     const brandGroup = document.createElement('div');
     brandGroup.className = 'brand-group';
 
-    const brand = document.createElement('span');
-    brand.className = 'brand';
-    brand.textContent = 'halp';
+    const brand = document.createElement('a');
+    brand.href = '#';
+    brand.className = 'brand brand-link';
+    brand.innerHTML = '<span class="brand-spark">💛</span> <span class="brand-text">halp</span>';
 
     const tag = document.createElement('span');
     tag.className = 'brand-subtitle';
-    tag.textContent = 'spread appreciation & joy';
+    tag.textContent = 'appreciation & joy';
 
     brandGroup.appendChild(brand);
     brandGroup.appendChild(tag);
@@ -286,7 +287,7 @@ export class HalpApp {
 
     const whyLink = document.createElement('a');
     whyLink.href = '#why-it-matters';
-    whyLink.textContent = 'Why Appreciation';
+    whyLink.textContent = 'Why Halp';
 
     const showcaseLink = document.createElement('a');
     showcaseLink.href = '#showcase';
@@ -294,11 +295,11 @@ export class HalpApp {
 
     const howLink = document.createElement('a');
     howLink.href = '#how-it-works';
-    howLink.textContent = 'How it works';
+    howLink.textContent = 'How It Works';
 
     const secLink = document.createElement('a');
     secLink.href = '#security';
-    secLink.textContent = 'Respect & Privacy';
+    secLink.textContent = 'Privacy & Care';
 
     nav.appendChild(whyLink);
     nav.appendChild(showcaseLink);
@@ -311,7 +312,7 @@ export class HalpApp {
     if (this.currentKey) {
       const loginBtn = document.createElement('button');
       loginBtn.type = 'button';
-      loginBtn.className = 'btn btn-secondary';
+      loginBtn.className = 'btn btn-secondary btn-nav';
       loginBtn.textContent = 'Switch Account';
       loginBtn.onclick = () => {
         this.currentView = 'login';
@@ -321,8 +322,8 @@ export class HalpApp {
 
       const appBtn = document.createElement('button');
       appBtn.type = 'button';
-      appBtn.className = 'btn';
-      appBtn.textContent = 'Open Dashboard →';
+      appBtn.className = 'btn btn-nav';
+      appBtn.textContent = 'Dashboard →';
       appBtn.onclick = async () => {
         try {
           await this.client.loginWithAccountKey(this.currentKey!);
@@ -341,7 +342,7 @@ export class HalpApp {
     } else {
       const loginBtn = document.createElement('button');
       loginBtn.type = 'button';
-      loginBtn.className = 'btn btn-secondary';
+      loginBtn.className = 'btn btn-secondary btn-nav';
       loginBtn.textContent = 'Log In';
       loginBtn.onclick = () => {
         this.currentView = 'login';
@@ -351,7 +352,7 @@ export class HalpApp {
 
       const registerBtn = document.createElement('button');
       registerBtn.type = 'button';
-      registerBtn.className = 'btn';
+      registerBtn.className = 'btn btn-nav';
       registerBtn.textContent = 'Get Started';
       registerBtn.onclick = () => {
         this.currentKey = generateAccountKey();
@@ -455,8 +456,8 @@ export class HalpApp {
     heroVisual.className = 'hero-visual-card';
 
     const heroImg = document.createElement('img');
-    heroImg.src = './assets/halp-appreciation-warmth.jpg';
-    heroImg.alt = 'Spreading quiet warmth and appreciation across teams worldwide';
+    heroImg.src = './assets/halp-warm-gratitude.jpg';
+    heroImg.alt = 'A peaceful, cozy moment of quiet gratitude and warmth';
     heroImg.className = 'hero-asset-img';
 
     const heroVisualCaption = document.createElement('div');
@@ -971,6 +972,22 @@ export class HalpApp {
     header.appendChild(title);
     header.appendChild(desc);
     section.appendChild(header);
+
+    const visual = document.createElement('div');
+    visual.className = 'security-visual-card';
+
+    const visualImg = document.createElement('img');
+    visualImg.src = './assets/halp-caring-light.jpg';
+    visualImg.alt = 'A gentle lantern glowing softly with kindness and peace of mind';
+    visualImg.className = 'security-asset-img';
+
+    const visualCaption = document.createElement('div');
+    visualCaption.className = 'security-visual-caption';
+    visualCaption.textContent = 'Protected kindness: a calm, quiet space free from public scrutiny, ads, tracking, and notification noise.';
+
+    visual.appendChild(visualImg);
+    visual.appendChild(visualCaption);
+    section.appendChild(visual);
 
     const grid = document.createElement('div');
     grid.className = 'security-grid';
