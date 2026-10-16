@@ -59,6 +59,12 @@
   "plugins": {
     "notification": {
       "all": true
+    },
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://halp.to/releases/desktop/{{target}}/{{arch}}/{{current_version}}"
+      ]
     }
   }
 }

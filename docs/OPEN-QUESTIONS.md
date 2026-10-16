@@ -605,3 +605,44 @@ Decided: The release pipeline (`.github/workflows/release.yml`) automates cross-
    - Developer Program memberships and certificates follow a strict annual renewal cycle tracked via automated calendar reminders at 90, 60, and 30 days prior to expiry.
 5. **The Human Blocker**: An AI agent cannot enter into legal contracts, verify legal entity identity, or execute payment transactions with Apple or DigiCert. The release workflow and documentation (`docs/RELEASE.md`) are 100% engineered and ready; the enrolment step is a human hand-off.
 
+### 47. Phase 2 Contacts Sync → **opaque AES-256-GCM blob under HKDF contacts_key with 4 KiB padding and CRDT set-union**
+
+Decided: client-side encrypted contacts sync is implemented via `GET /v1/contacts`, `PUT /v1/contacts`, and `DELETE /v1/contacts` backed by the `contacts_blobs(account_id, blob, version, updated_day)` table in the home region.
+
+Key properties:
+1. **Cryptographic separation**: The client-side 16-digit account key never leaves the device. Contacts are sealed using AES-256-GCM with a fresh 12-byte nonce per write under `contacts_key = HKDF-SHA256(account_key, "halp/contacts/v1")`. The server only ever observes `auth_secret = HKDF-SHA256(account_key, "halp/auth/v1")` and cannot decrypt contact blobs or observe contact counts (Invariant 6).
+2. **Size privacy**: Blobs are padded to a 4 KiB boundary before encryption to leak only coarse size buckets rather than contact counts. Storage is hard-capped at 64 KiB (`contacts.max_bytes`), adhering to Invariant 8 fixed memory ceilings (~1,500 contacts).
+3. **Optimistic concurrency & CRDT merge**: Updates enforce `If-Match: <version>`. When concurrent multi-device updates conflict, the client fetches the remote version and applies a deterministic set-union merge where `deleted: true` tombstones authoritatively win, guaranteeing zero silent contact loss.
+
+### 48. Phase 2 Groups → **groups.min_size = 5 floor, membership-gated pings, auto-burn on departure, 10/day sender spray cap**
+
+Decided: group support is implemented via `POST/GET/PATCH/DELETE /v1/groups*` with strict privacy invariants:
+1. **Minimum size floor**: A hard floor of `groups.min_size = 5` members is enforced. If active group membership falls below 5, resolution of group-scoped handles is disabled immediately to prevent recipient deanonymisation by elimination.
+2. **Membership verification**: `POST /v1/ping/{handle}` for group-scoped handles authoritatively verifies that the authenticated sender is an active group member. External non-members are rejected with uniform timing (Invariant 7).
+3. **Departure handle lifecycle**: When a member leaves or is removed from a group, all of their group-scoped handles are automatically burned.
+4. **Owner succession**: If the group owner leaves or deletes their account, ownership is automatically transferred to the longest-standing active member (`MIN(joined_day)`). If no members remain, the group is cleanly deleted.
+5. **Spray protection**: Sender spray across group members is capped at 10 distinct group members per day via `PairCascade`, preventing abusive broadcast floods within teams.
+
+### 49. Phase 2 Go TUI Client → **pure Go Bubble Tea client, SSE streaming with demote fallback, 300 ms latency floor**
+
+Decided: the official terminal client (`tui/cmd/halp`) is implemented in pure Go (`CGO_ENABLED=0`) as a single, static binary with zero external runtime dependencies:
+1. **Elm architecture**: State management uses the Bubble Tea framework with a strict `Init`, `Update`, and `View` event loop and Lip Gloss styling conforming to `docs/UI.md`.
+2. **Real-time transport**: Connects to `GET /v1/stream` via Server-Sent Events, processing incoming pings, heartbeats (`event: ka`), and gracefully falling back to polling `GET /v1/pending` upon receiving `event: demote`.
+3. **Audible alert**: Supports an optional terminal bell (`\a`) notification on ping receipt.
+4. **CLI send mode**: `halp send <handle>` executes a non-interactive send with local Hashcash PoW grinding and an enforced 300 ms perceived latency floor to preserve timing indistinguishability (Invariant 7).
+
+### 50. Phase 2 Desktop App Polish → **opt-in launch-at-login, verbatim burn confirmation dialog, Tauri updater configuration**
+
+Decided: desktop client polish in Tauri (`desktop/`) satisfies platform and safety requirements:
+1. **Launch at login**: Launch-at-login is offered in settings and onboarding, but is **never enabled by default** per `docs/UI.md` §9, strictly respecting user agency.
+2. **Handle management & burn dialog**: Dedicated views for creating, pausing, and burning handles. Deleting/burning a handle requires typing the exact verbatim confirmation phrase (`burn <handle>`) as specified in `docs/UI.md` §4, preventing accidental destruction of permanent handles.
+3. **Auto-update security**: The Tauri updater endpoint is configured to fetch signed update manifests over HTTPS with Ed25519 signature verification against public keys embedded at build time.
+
+| Decision | Topic | Summary |
+| --- | --- | --- |
+| 47 | Phase 2 Contacts Sync | `GET/PUT/DELETE /v1/contacts` with `If-Match` optimistic concurrency, 4 KiB boundary padding before AES-256-GCM encryption under `HKDF-SHA256(account_key, "halp/contacts/v1")`, 64 KiB ceiling, and CRDT set-union merge where `deleted: true` wins. |
+| 48 | Phase 2 Groups | `POST/GET/PATCH/DELETE /v1/groups*`, `groups.min_size = 5` floor disabling group-scoped handle resolution below 5 members, group membership verification on `POST /v1/ping/{handle}`, automatic handle burn on leave/remove, owner promotion to longest-standing member, and 10 distinct group members/day sender spray cap via `PairCascade`. |
+| 49 | Phase 2 Go TUI Client | `tui/cmd/halp`, pure Go `CGO_ENABLED=0`, Bubble Tea Elm-architecture `Init/Update/View` state machine, SSE streaming with `event: demote` fallback to `GET /v1/pending`, optional terminal bell `\a`, and `halp send <handle>` with 300 ms latency floor. |
+| 50 | Phase 2 Desktop App Polish | launch-at-login offered and never default-on per `docs/UI.md` §9, per-handle create/pause/burn view with verbatim burn prompt, and Tauri updater endpoint configuration. |
+
+

@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DesktopApp } from '../dist/app.js';
+import { DesktopApp, formatBurnPrompt } from '../dist/app.js';
 import { MockDesktopBridge } from '../dist/bridge.js';
 import { HalpClient } from '@halp/core';
 
@@ -36,8 +36,10 @@ describe('Desktop App (Tauri v2) DoD Verification', () => {
       assert.doesNotMatch(csp, /analytics/);
     });
 
-    test('configures system tray icon', () => {
+    test('configures system tray icon and auto-updater endpoint', () => {
       assert.ok(config.app?.trayIcon, 'tray icon must be defined in app.trayIcon');
+      assert.equal(config.plugins?.updater?.active, true, 'updater plugin must be active');
+      assert.ok(Array.isArray(config.plugins?.updater?.endpoints), 'updater endpoints must be defined');
     });
   });
 
@@ -137,6 +139,10 @@ describe('Desktop App (Tauri v2) DoD Verification', () => {
         'target-input': { value: '' },
         'send-btn': { disabled: false, textContent: 'Send' },
         'handle-display': { textContent: 'e0123456789ab' },
+        'handle-list': { textContent: '' },
+        'autostart-check': { checked: false, onchange: null as any },
+        'update-status': { textContent: '' },
+        'check-update-btn': { onclick: null as any },
         'clear-key-btn': { onclick: null as any },
         'copy-handle-btn': { onclick: null as any },
         'connection-dot': { className: '', classList: { add: (c: string) => { domElements['connection-dot'].className += ` ${c}`; } } },
@@ -180,6 +186,74 @@ describe('Desktop App (Tauri v2) DoD Verification', () => {
 
       assert.equal(domElements['key-wall'].style.display, 'none');
       assert.equal(domElements['home-view'].style.display, 'flex');
+    });
+
+    test('Phase 2 Polish: Launch-at-login is offered, never default-on (docs/UI.md §9)', async () => {
+      await bridge.saveAccountKey('1234567890123456');
+      const app = new DesktopApp(bridge);
+      await app.init();
+
+      assert.equal(await bridge.getAutostart(), false, 'Autostart must default to false');
+      assert.equal(domElements['autostart-check'].checked, false, 'Checkbox must be unchecked by default');
+
+      // User explicitly enables launch-at-login
+      domElements['autostart-check'].checked = true;
+      await domElements['autostart-check'].onchange();
+      assert.equal(await bridge.getAutostart(), true, 'Autostart updates when toggled by user');
+    });
+
+    test('Phase 2 Polish: Per-handle view (list, create, pause toggle, and verbatim burn)', async () => {
+      const mockClient = new HalpClient({ baseUrl: 'https://halp.to' });
+      const storedHandles = [
+        { handle: 'e0123456789ab', kind: 'personal' as const, label: 'Work', paused: false, created_day: 20500 },
+        { handle: 'e9876543210cd', kind: 'social' as const, label: 'GitHub', paused: false, created_day: 20500 },
+      ];
+      mockClient.listHandles = async () => [...storedHandles];
+      mockClient.createHandle = async (label = '', kind = 'personal') => {
+        const created = { handle: 'enewhandle123', kind, label, paused: false, created_day: 20500 };
+        storedHandles.push(created as any);
+        return created;
+      };
+      mockClient.updateHandle = async (handle, patch) => {
+        const h = storedHandles.find((item) => item.handle === handle)!;
+        if (patch.paused !== undefined) h.paused = patch.paused;
+      };
+      mockClient.deleteHandle = async (handle) => {
+        const idx = storedHandles.findIndex((item) => item.handle === handle);
+        if (idx !== -1) storedHandles.splice(idx, 1);
+      };
+
+      const app = new DesktopApp(bridge, mockClient);
+      await app.refreshHandles();
+      assert.equal(app.handles.length, 2);
+      assert.ok(domElements['handle-list'].textContent.includes('e0123456789ab (Work)'));
+
+      // Create handle
+      await app.handleCreateHandle('stream', 'Stream');
+      assert.equal(app.handles.length, 3);
+
+      // Pause handle
+      await app.handleTogglePause('e0123456789ab', true);
+      assert.equal(app.handles[0].paused, true);
+
+      // Verbatim burn prompt & confirmation check
+      assert.equal(
+        formatBurnPrompt('e9876543210cd'),
+        'Burn e9876543210cd? Anyone with this link or QR code loses the ability to reach you, immediately and permanently. The handle is never reissued and this cannot be undone. Your other handles are unaffected.'
+      );
+      const wrongConfirm = await app.handleBurnHandle('e9876543210cd', 'wrong');
+      assert.equal(wrongConfirm, false);
+      const burned = await app.handleBurnHandle('e9876543210cd', 'e9876543210cd');
+      assert.equal(burned, true);
+      assert.equal(app.handles.length, 2);
+    });
+
+    test('Phase 2 Polish: Auto-update check updates status', async () => {
+      bridge.updateResult = { updateAvailable: true, version: '0.2.0' };
+      const app = new DesktopApp(bridge);
+      const msg = await app.handleCheckForUpdates();
+      assert.equal(msg, 'Update available: v0.2.0');
+      assert.equal(domElements['update-status'].textContent, 'Update available: v0.2.0');
     });
   });
 

@@ -24,10 +24,14 @@ import {
   HandleDTO,
   SettingsDTO,
   TransportManager,
+  ContactEntry,
+  GroupDTO,
+  GroupRosterResponse,
+  syncContacts,
 } from '@halp/core';
 import { QRCode } from './qr.js';
 
-// Verbatim copy constants from docs/UI.md
+// Verbatim copy constants from docs/UI.md & docs/GROUPS.md
 export const COPY = {
   keyWall: {
     title: 'This is your account. There is no email, no password and no reset.',
@@ -79,6 +83,9 @@ export const COPY = {
     action: 'Appreciate them',
     error: 'Something went wrong. Try again.',
   },
+  groups: {
+    minSizeNotice: 'Group handles are paused until at least 5 members join.',
+  },
   landing: {
     heroTitle: 'Someone appreciates you.',
     heroSubtitle:
@@ -101,6 +108,10 @@ export class HalpApp {
   public currentView: AppView = 'landing';
   public currentKey: string | null = null;
   public handles: HandleDTO[] = [];
+  public contacts: ContactEntry[] = [];
+  public contactsVersion = 0;
+  public groups: GroupDTO[] = [];
+  public activeGroupRoster: GroupRosterResponse | null = null;
   public todayCount = 0;
   public settings: SettingsDTO | null = null;
   public activeModalHandle: HandleDTO | null = null;
@@ -277,8 +288,54 @@ export class HalpApp {
       if (pending) {
         this.todayCount = pending.n;
       }
+      this.groups = await this.client.listGroups();
+      if (this.currentKey) {
+        await this.syncContactsWithServer();
+      }
     } catch {
       // Data load failures gracefully fall back
+    }
+  }
+
+  async syncContactsWithServer(): Promise<ContactEntry[]> {
+    if (!this.currentKey) return this.contacts;
+    const res = await syncContacts(this.client, this.currentKey, this.contacts);
+    this.contacts = res.entries;
+    this.contactsVersion = res.version;
+    return this.contacts;
+  }
+
+  async addContact(handle: string, nickname: string): Promise<void> {
+    const existing = this.contacts.find((c) => c.handle === handle);
+    if (existing) {
+      existing.nickname = nickname;
+      delete existing.deleted;
+    } else {
+      this.contacts.push({
+        handle,
+        nickname,
+        added_day: Math.floor(Date.now() / 86400000),
+      });
+    }
+    if (this.currentKey) {
+      await this.syncContactsWithServer().catch(() => {});
+    }
+  }
+
+  async removeContact(handle: string): Promise<void> {
+    const existing = this.contacts.find((c) => c.handle === handle);
+    if (existing) {
+      existing.deleted = true;
+    } else {
+      this.contacts.push({
+        handle,
+        nickname: '',
+        added_day: Math.floor(Date.now() / 86400000),
+        deleted: true,
+      });
+    }
+    if (this.currentKey) {
+      await this.syncContactsWithServer().catch(() => {});
     }
   }
 
@@ -1765,7 +1822,194 @@ export class HalpApp {
     handlesCard.appendChild(listDiv);
     section.appendChild(handlesCard);
 
+    // Contacts Section (Phase 2 — Client-Encrypted Contacts Sync)
+    section.appendChild(this.renderContactsSection());
+
+    // Groups Section (Phase 2 — Groups & Roster)
+    section.appendChild(this.renderGroupsSection());
+
     return section;
+  }
+
+  renderContactsSection(): HTMLElement {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.id = 'contacts-card';
+
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.justifyContent = 'space-between';
+    header.style.alignItems = 'center';
+
+    const h2 = document.createElement('h2');
+    h2.textContent = 'Saved contacts';
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'btn btn-secondary';
+    addBtn.textContent = '+ Save contact';
+    addBtn.onclick = async () => {
+      const handle = prompt('Contact handle:');
+      if (!handle) return;
+      const label = prompt('Contact nickname:') || handle;
+      await this.addContact(handle.trim(), label.trim());
+      this.render();
+    };
+
+    header.appendChild(h2);
+    header.appendChild(addBtn);
+    card.appendChild(header);
+
+    const activeContacts = this.contacts.filter((c) => !c.deleted);
+    const listDiv = document.createElement('div');
+    listDiv.className = 'handle-list';
+
+    for (const c of activeContacts) {
+      const row = document.createElement('div');
+      row.className = 'handle-item';
+
+      const info = document.createElement('div');
+      info.textContent = `${c.nickname} (${c.handle})`;
+
+      const actions = document.createElement('div');
+      actions.className = 'button-group';
+
+      const pingBtn = document.createElement('button');
+      pingBtn.type = 'button';
+      pingBtn.className = 'btn';
+      pingBtn.textContent = COPY.send.action;
+      pingBtn.onclick = async () => {
+        pingBtn.disabled = true;
+        pingBtn.textContent = COPY.send.sending;
+        const t0 = performance.now();
+        try {
+          await this.client.sendPing(c.handle);
+        } catch {}
+        const wait = Math.max(0, 300 - (performance.now() - t0));
+        await new Promise((r) => setTimeout(r, wait));
+        pingBtn.textContent = COPY.send.sent;
+      };
+
+      const delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn btn-secondary';
+      delBtn.textContent = 'Remove';
+      delBtn.onclick = async () => {
+        await this.removeContact(c.handle);
+        this.render();
+      };
+
+      actions.appendChild(pingBtn);
+      actions.appendChild(delBtn);
+      row.appendChild(info);
+      row.appendChild(actions);
+      listDiv.appendChild(row);
+    }
+
+    card.appendChild(listDiv);
+    return card;
+  }
+
+  renderGroupsSection(): HTMLElement {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.id = 'groups-card';
+
+    const header = document.createElement('div');
+    header.style.display = 'flex';
+    header.style.justifyContent = 'space-between';
+    header.style.alignItems = 'center';
+
+    const h2 = document.createElement('h2');
+    h2.textContent = 'Groups';
+
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'button-group';
+
+    const createBtn = document.createElement('button');
+    createBtn.type = 'button';
+    createBtn.className = 'btn btn-secondary';
+    createBtn.textContent = '+ Create group';
+    createBtn.onclick = async () => {
+      const name = prompt('Group name:');
+      if (!name) return;
+      const nickname = prompt('Your nickname in this group:') || 'Member';
+      const created = await this.client.createGroup(name.trim(), nickname.trim());
+      this.groups.push({
+        id: created.group_id,
+        name: name.trim(),
+        role: 'owner',
+        my_handle: created.my_handle,
+        member_count: 1,
+      });
+      this.render();
+    };
+
+    const joinBtn = document.createElement('button');
+    joinBtn.type = 'button';
+    joinBtn.className = 'btn btn-secondary';
+    joinBtn.textContent = 'Join group';
+    joinBtn.onclick = async () => {
+      const invite = prompt('Invite code:');
+      if (!invite) return;
+      const nickname = prompt('Your nickname in this group:') || 'Member';
+      const joined = await this.client.joinGroup(invite.trim(), nickname.trim());
+      this.groups.push({
+        id: joined.group_id,
+        name: `Group #${joined.group_id}`,
+        role: 'member',
+        my_handle: joined.my_handle,
+      });
+      this.render();
+    };
+
+    btnGroup.appendChild(createBtn);
+    btnGroup.appendChild(joinBtn);
+    header.appendChild(h2);
+    header.appendChild(btnGroup);
+    card.appendChild(header);
+
+    const listDiv = document.createElement('div');
+    listDiv.className = 'handle-list';
+
+    for (const g of this.groups) {
+      const row = document.createElement('div');
+      row.className = 'handle-item';
+
+      const title = document.createElement('div');
+      title.textContent = `${g.name} (${g.role || 'member'})`;
+      row.appendChild(title);
+
+      if (g.member_count !== undefined && g.member_count < 5) {
+        const notice = document.createElement('div');
+        notice.className = 'notice-box group-min-size-notice';
+        notice.textContent = COPY.groups.minSizeNotice;
+        row.appendChild(notice);
+      }
+
+      listDiv.appendChild(row);
+    }
+
+    if (this.activeGroupRoster) {
+      const rosterBox = document.createElement('div');
+      rosterBox.className = 'group-roster';
+      if (this.activeGroupRoster.members.length < 5) {
+        const notice = document.createElement('div');
+        notice.className = 'notice-box group-min-size-notice';
+        notice.textContent = COPY.groups.minSizeNotice;
+        rosterBox.appendChild(notice);
+      }
+      for (const m of this.activeGroupRoster.members) {
+        const mRow = document.createElement('div');
+        mRow.className = 'roster-member';
+        mRow.textContent = `${m.display_name} (${m.handle})`;
+        rosterBox.appendChild(mRow);
+      }
+      card.appendChild(rosterBox);
+    }
+
+    card.appendChild(listDiv);
+    return card;
   }
 
   renderHandleRow(h: HandleDTO): HTMLElement {

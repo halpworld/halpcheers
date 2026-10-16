@@ -397,3 +397,38 @@ test('Responsive media queries and smooth scrolling defined in stylesheet', () =
   assert.ok(css.includes('.mobile-menu-toggle'), 'Mobile toggle styles defined');
   assert.ok(css.includes('.btn-nav-mobile-primary'), 'Mobile primary CTA styled');
 });
+
+// -----------------------------------------------------------------------------
+// 8. Phase 2 — Contacts & Groups UI Tests
+// -----------------------------------------------------------------------------
+
+test('Phase 2: Contacts section renders saved contacts and hides deleted tombstones', async () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+  await app.addContact('e0123456789ab', 'Alice');
+  await app.addContact('e9876543210cd', 'Bob');
+  await app.removeContact('e9876543210cd');
+
+  const card = app.renderContactsSection() as unknown as MockElement;
+  assert.strictEqual(card.id, 'contacts-card');
+  const listDiv = card.querySelector('.handle-list');
+  assert.ok(listDiv !== null);
+  assert.strictEqual(listDiv.children.length, 1, 'Only non-deleted contact is rendered');
+  assert.strictEqual(listDiv.children[0].children[0].textContent, 'Alice (e0123456789ab)');
+});
+
+test('Phase 2: Groups section displays min_size (< 5 members) notice per docs/GROUPS.md', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+  app.groups = [
+    { id: 1, name: 'Small Team', role: 'owner', my_handle: 'esmallgroup12', member_count: 3 },
+    { id: 2, name: 'Active Team', role: 'member', my_handle: 'eactivegrp123', member_count: 5 },
+  ];
+
+  const card = app.renderGroupsSection() as unknown as MockElement;
+  assert.strictEqual(card.id, 'groups-card');
+  const notice = card.querySelector('.group-min-size-notice');
+  assert.ok(notice !== null, 'Shows min-size notice when group has < 5 members');
+  assert.strictEqual(notice.textContent, COPY.groups.minSizeNotice);
+});
+

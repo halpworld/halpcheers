@@ -124,6 +124,30 @@ func (pc *PairCascade) rotateIfNeeded(today core.Day) {
 	}
 }
 
+// HasSeenToday reports whether (sender, handle) has already been recorded in slot 0 today.
+func (pc *PairCascade) HasSeenToday(sender core.AccountID, handle core.Handle) bool {
+	today := core.Today()
+	pc.rotateIfNeeded(today)
+
+	pc.mu.RLock()
+	curr := pc.curr
+	pc.mu.RUnlock()
+
+	if len(curr.slots) == 0 {
+		return false
+	}
+
+	h1, h2 := hashPair(curr.key, sender, handle)
+
+	pc.mu.RLock()
+	defer pc.mu.RUnlock()
+	if pc.curr != curr {
+		curr = pc.curr
+		h1, h2 = hashPair(curr.key, sender, handle)
+	}
+	return curr.slots[0].Contains(h1, h2)
+}
+
 // Allow evaluates the cascade for (sender, handle) up to limit slots.
 // INVARIANT: False positives advance a slot, costing quota rather than granting it.
 func (pc *PairCascade) Allow(sender core.AccountID, handle core.Handle, limit int) bool {
@@ -134,14 +158,18 @@ func (pc *PairCascade) Allow(sender core.AccountID, handle core.Handle, limit in
 	curr := pc.curr
 	pc.mu.RUnlock()
 
-	if limit > curr.maxSlots {
-		limit = curr.maxSlots
-	}
-
 	h1, h2 := hashPair(curr.key, sender, handle)
 
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
+	if pc.curr != curr {
+		curr = pc.curr
+		h1, h2 = hashPair(curr.key, sender, handle)
+	}
+
+	if limit > curr.maxSlots {
+		limit = curr.maxSlots
+	}
 
 	for slot := 0; slot < limit; slot++ {
 		if !curr.slots[slot].Contains(h1, h2) {
@@ -298,6 +326,70 @@ func (e *EWMA) Rate() float64 {
 	return e.rate
 }
 
+const defaultGuardMapCapacity = 10_000
+
+// boundedMap is a thread-safe fixed-capacity map that evicts an existing entry
+// when capacity is reached, strictly enforcing AGENTS.md Invariant 8.
+type boundedMap[K comparable, V any] struct {
+	mu       sync.RWMutex
+	capacity int
+	items    map[K]V
+}
+
+func newBoundedMap[K comparable, V any](capacity int) *boundedMap[K, V] {
+	if capacity <= 0 {
+		capacity = defaultGuardMapCapacity
+	}
+	return &boundedMap[K, V]{
+		capacity: capacity,
+		items:    make(map[K]V),
+	}
+}
+
+func (m *boundedMap[K, V]) Load(key K) (V, bool) {
+	m.mu.RLock()
+	v, ok := m.items[key]
+	m.mu.RUnlock()
+	return v, ok
+}
+
+func (m *boundedMap[K, V]) Store(key K, val V) {
+	m.mu.Lock()
+	if _, exists := m.items[key]; !exists && len(m.items) >= m.capacity {
+		for k := range m.items {
+			delete(m.items, k)
+			break
+		}
+	}
+	m.items[key] = val
+	m.mu.Unlock()
+}
+
+func (m *boundedMap[K, V]) LoadOrStore(key K, newFn func() V) V {
+	m.mu.RLock()
+	if v, ok := m.items[key]; ok {
+		m.mu.RUnlock()
+		return v
+	}
+	m.mu.RUnlock()
+
+	m.mu.Lock()
+	if v, ok := m.items[key]; ok {
+		m.mu.Unlock()
+		return v
+	}
+	if len(m.items) >= m.capacity {
+		for k := range m.items {
+			delete(m.items, k)
+			break
+		}
+	}
+	val := newFn()
+	m.items[key] = val
+	m.mu.Unlock()
+	return val
+}
+
 // Service is the primary Guard implementation satisfying core.Guard and pow.DifficultyFeed.
 type Service struct {
 	cascade       *PairCascade
@@ -305,11 +397,11 @@ type Service struct {
 	blockStore    BlockStore
 	metrics       *obs.Metrics
 	globalEWMA    *EWMA
-	targetEWMAs   sync.Map // handle string -> *EWMA
-	senderBuckets sync.Map // AccountID -> *TokenBucket
-	targetBuckets sync.Map // handle string -> *TokenBucket
-	suspended     sync.Map // AccountID -> bool
-	topSenders    sync.Map // handle string -> topSenderRecord
+	targetEWMAs   *boundedMap[string, *EWMA]
+	senderBuckets *boundedMap[core.AccountID, *TokenBucket]
+	targetBuckets *boundedMap[string, *TokenBucket]
+	suspended     *boundedMap[core.AccountID, bool]
+	topSenders    *boundedMap[string, topSenderRecord]
 
 	pairMaxPersonal int
 	pairMaxSocial   int
@@ -330,6 +422,7 @@ type Config struct {
 	SketchDepth     int
 	SenderHour      int
 	SenderDay       int
+	MapCapacity     int
 	BlockStore      BlockStore
 	Metrics         *obs.Metrics
 }
@@ -365,6 +458,10 @@ func NewService(cfg Config) *Service {
 	if sDay <= 0 {
 		sDay = 100
 	}
+	capSize := cfg.MapCapacity
+	if capSize <= 0 {
+		capSize = defaultGuardMapCapacity
+	}
 
 	return &Service{
 		cascade:         NewPairCascade(pStream, slotBytes),
@@ -372,6 +469,11 @@ func NewService(cfg Config) *Service {
 		blockStore:      cfg.BlockStore,
 		metrics:         cfg.Metrics,
 		globalEWMA:      NewEWMA(60 * time.Second),
+		targetEWMAs:     newBoundedMap[string, *EWMA](capSize),
+		senderBuckets:   newBoundedMap[core.AccountID, *TokenBucket](capSize),
+		targetBuckets:   newBoundedMap[string, *TokenBucket](capSize),
+		suspended:       newBoundedMap[core.AccountID, bool](capSize),
+		topSenders:      newBoundedMap[string, topSenderRecord](capSize),
 		pairMaxPersonal: pPersonal,
 		pairMaxSocial:   pSocial,
 		pairMaxGroup:    pGroup,
@@ -389,7 +491,7 @@ func (s *Service) SuspendAccount(id core.AccountID) {
 // IsSuspended reports if an account is suspended.
 func (s *Service) IsSuspended(id core.AccountID) bool {
 	v, ok := s.suspended.Load(id)
-	return ok && v.(bool)
+	return ok && v
 }
 
 // PairLimitForKind returns the configured pair limit for a handle kind.
@@ -429,8 +531,10 @@ func (s *Service) Allow(ctx context.Context, sender core.AccountID, target core.
 	}
 
 	// 3. Sender rate limit bucket (Layer 1: 20/hour default)
-	sbVal, _ := s.senderBuckets.LoadOrStore(sender, NewTokenBucket(s.senderHour, 1*time.Hour))
-	if !sbVal.(*TokenBucket).Allow() {
+	sb := s.senderBuckets.LoadOrStore(sender, func() *TokenBucket {
+		return NewTokenBucket(s.senderHour, 1*time.Hour)
+	})
+	if !sb.Allow() {
 		if s.metrics != nil {
 			s.metrics.IncPingsDropped(obs.DropReasonRateLimited)
 		}
@@ -438,15 +542,30 @@ func (s *Service) Allow(ctx context.Context, sender core.AccountID, target core.
 	}
 
 	// 4. Target inbound rate limit bucket (Layer 1: configurable cap on deliveries/hour)
-	tbVal, _ := s.targetBuckets.LoadOrStore(target.Raw(), NewTokenBucket(1000, 1*time.Hour))
-	if !tbVal.(*TokenBucket).Allow() {
+	tb := s.targetBuckets.LoadOrStore(target.Raw(), func() *TokenBucket {
+		return NewTokenBucket(1000, 1*time.Hour)
+	})
+	if !tb.Allow() {
 		if s.metrics != nil {
 			s.metrics.IncPingsDropped(obs.DropReasonRateLimited)
 		}
 		return false
 	}
 
-	// 5. Pair-limit cascade (Layer 1: 3/24h or 10/24h)
+	// 5. Group distinct-member daily spray cap (docs/GROUPS.md § Abuse considerations):
+	// Prevent a group member from spraying the entire roster daily (capped at 10 distinct group handles/24h).
+	if targetKind == core.HandleKindGroup {
+		if !s.cascade.HasSeenToday(sender, target) {
+			if !s.cascade.Allow(sender, core.Handle("__group_distinct__"), 10) {
+				if s.metrics != nil {
+					s.metrics.IncPingsDropped(obs.DropReasonRateLimited)
+				}
+				return false
+			}
+		}
+	}
+
+	// 6. Pair-limit cascade (Layer 1: 3/24h or 10/24h)
 	pairLimit := s.PairLimitForKind(targetKind)
 	if !s.cascade.Allow(sender, target, pairLimit) {
 		if s.metrics != nil {
@@ -457,17 +576,14 @@ func (s *Service) Allow(ctx context.Context, sender core.AccountID, target core.
 
 	// Record telemetry & anomaly metrics
 	s.globalEWMA.Add(1.0)
-	ewmaVal, _ := s.targetEWMAs.LoadOrStore(target.Raw(), NewEWMA(60*time.Second))
-	ewmaVal.(*EWMA).Add(1.0)
+	ewma := s.targetEWMAs.LoadOrStore(target.Raw(), func() *EWMA {
+		return NewEWMA(60 * time.Second)
+	})
+	ewma.Add(1.0)
 	s.sketch.Add(target, sender)
 	est := s.sketch.Estimate(target, sender)
-	if actual, loaded := s.topSenders.Load(target.Raw()); !loaded {
+	if actual, loaded := s.topSenders.Load(target.Raw()); !loaded || est >= actual.count {
 		s.topSenders.Store(target.Raw(), topSenderRecord{sender: sender, count: est})
-	} else {
-		rec := actual.(topSenderRecord)
-		if est >= rec.count {
-			s.topSenders.Store(target.Raw(), topSenderRecord{sender: sender, count: est})
-		}
 	}
 
 	return true
@@ -481,11 +597,8 @@ type topSenderRecord struct {
 // TopSender returns the heaviest sender into handle for the current window.
 // Satisfies settings.TopSenderEstimator interface.
 func (s *Service) TopSender(ctx context.Context, handle core.Handle) (core.AccountID, bool) {
-	if val, ok := s.topSenders.Load(handle.Raw()); ok {
-		rec := val.(topSenderRecord)
-		if rec.count > 0 {
-			return rec.sender, true
-		}
+	if rec, ok := s.topSenders.Load(handle.Raw()); ok && rec.count > 0 {
+		return rec.sender, true
 	}
 	return 0, false
 }
@@ -494,8 +607,8 @@ func (s *Service) TopSender(ctx context.Context, handle core.Handle) (core.Accou
 func (s *Service) Difficulty(target string, sender core.AccountID) uint8 {
 	var diff uint8 = 14
 
-	if v, ok := s.targetEWMAs.Load(target); ok {
-		rate := v.(*EWMA).Rate()
+	if ewma, ok := s.targetEWMAs.Load(target); ok {
+		rate := ewma.Rate()
 		if rate > 50.0 {
 			diff = 20
 		} else if rate > 20.0 {

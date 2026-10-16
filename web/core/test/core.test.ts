@@ -283,3 +283,106 @@ test('Key storage abstraction stores, loads, and clears account key', async () =
   const cleared = await loadAccountKey(mockStorage);
   assert.strictEqual(cleared, null);
 });
+
+// -----------------------------------------------------------------------------
+// 7. Phase 2 Contacts Sync (4 KiB Padding, AES-256-GCM, CRDT Merge, If-Match)
+// -----------------------------------------------------------------------------
+
+import {
+  padContactsPlaintext,
+  unpadContactsPlaintext,
+  encryptContactsBlob,
+  decryptContactsBlob,
+  mergeContacts,
+  syncContacts,
+  base64ToBytes,
+  CONTACTS_PAD_BLOCK_BYTES,
+  AES_GCM_IV_BYTES,
+} from '../dist/index.js';
+
+test('Contacts Sync: 4 KiB boundary padding, AES-256-GCM round-trip, and fresh IV per seal', async () => {
+  const accountKey = '6421883051974462';
+  const entries = [
+    { handle: 'e7k4p2m9qx3va', nickname: 'Alice', added_day: 20001 },
+    { handle: 'e9m2x7t4k8wpb', nickname: 'Bob', added_day: 20002 },
+  ];
+
+  const payload = new TextEncoder().encode(JSON.stringify({ entries }));
+  const padded = padContactsPlaintext(payload);
+  assert.strictEqual(padded.byteLength, CONTACTS_PAD_BLOCK_BYTES, 'padded to 4096 bytes');
+  const unpadded = unpadContactsPlaintext(padded);
+  assert.deepStrictEqual(unpadded, payload);
+
+  const blob1 = await encryptContactsBlob(entries, accountKey);
+  const blob2 = await encryptContactsBlob(entries, accountKey);
+  assert.notStrictEqual(blob1, blob2, 'fresh random IV ensures distinct ciphertexts');
+
+  const rawBytes = base64ToBytes(blob1);
+  // 12B IV + 4096B padded plaintext + 16B GCM tag = 4124 bytes
+  assert.strictEqual(rawBytes.byteLength, AES_GCM_IV_BYTES + CONTACTS_PAD_BLOCK_BYTES + 16);
+
+  const decrypted = await decryptContactsBlob(blob1, accountKey);
+  assert.deepStrictEqual(decrypted, entries);
+});
+
+test('Contacts Sync: CRDT set-union merge where deletion wins and If-Match 412 retry', async () => {
+  const deviceA = [
+    { handle: 'e111111111111', nickname: 'Alice', added_day: 20000 },
+    { handle: 'e222222222222', nickname: 'Bob', added_day: 20000, deleted: true },
+  ];
+  const deviceB = [
+    { handle: 'e222222222222', nickname: 'Bob', added_day: 20000 },
+    { handle: 'e333333333333', nickname: 'Charlie', added_day: 20001 },
+  ];
+
+  const merged = mergeContacts(deviceA, deviceB);
+  assert.strictEqual(merged.length, 3);
+  const bob = merged.find((e) => e.handle === 'e222222222222');
+  assert.ok(bob?.deleted, 'deletion wins in CRDT set-union merge');
+
+  // Verify syncContacts handles 412 Precondition Failed by re-fetching, merging, and retrying
+  const accountKey = '6421883051974462';
+  let serverVersion = 1;
+  let serverBlob = await encryptContactsBlob(deviceB, accountKey);
+  let putAttempts = 0;
+
+  const mockFetch: typeof fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const method = init?.method || 'GET';
+    if (method === 'GET') {
+      return new Response(
+        JSON.stringify({ version: serverVersion, blob: serverBlob }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (method === 'PUT') {
+      putAttempts++;
+      if (putAttempts === 1) {
+        // Simulate concurrent write from another device advancing version to 2
+        serverVersion = 2;
+        return new Response(
+          JSON.stringify({ error: 'version_conflict' }),
+          { status: 412, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      const bodyObj = JSON.parse(String(init?.body || '{}'));
+      serverBlob = bodyObj.blob;
+      serverVersion++;
+      return new Response(
+        JSON.stringify({ version: serverVersion }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    return new Response(null, { status: 404 });
+  };
+
+  const client = new HalpClient({
+    baseUrl: 'https://api.halp.test',
+    sessionToken: 'tok',
+    fetchFn: mockFetch,
+  });
+
+  const result = await syncContacts(client, accountKey, deviceA);
+  assert.strictEqual(putAttempts, 2, 'retried after 412 conflict');
+  assert.strictEqual(result.version, 3);
+  assert.strictEqual(result.entries.length, 3);
+});

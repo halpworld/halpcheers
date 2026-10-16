@@ -5,34 +5,34 @@ Every phase below is gated on that. The overlay, the badges and the groups are
 all amplifiers, and an amplifier on top of an undefended primitive is how this
 category of product dies.
 
-## Phase 0 — Skeleton
+## Phase 0 — Skeleton *(Completed)*
 
-* Repo layout, `AGENTS.md`, CI (build, vet, staticcheck, race tests), Dockerfile,
+* [x] Repo layout, `AGENTS.md`, CI (build, vet, staticcheck, race tests), Dockerfile,
   `docker-compose.yml`.
-* Go server that boots, opens SQLite in WAL, serves `/healthz` and `/metrics`.
-* Schema migrations (plain SQL files, applied in order, no framework).
+* [x] Go server that boots, opens SQLite in WAL, serves `/healthz` and `/metrics`.
+* [x] Schema migrations (plain SQL files, applied in order, no framework).
 
-## Phase 1 — The primitive, defended
+## Phase 1 — The primitive, defended *(Completed & Verified)*
 
 The minimum shippable thing, and it is not small, because "defended" is the
 product.
 
-* Accounts: signup with PoW, account key, Argon2id, sessions, export, delete.
-* Handles: create, label, pause, burn. Region prefix. LRU over SQLite.
-* `POST /v1/ping/{handle}` → 202 with the full ingress chain: auth, PoW,
+* [x] Accounts: signup with PoW, account key, Argon2id, sessions, export, delete.
+* [x] Handles: create, label, pause, burn. Region prefix. LRU over SQLite.
+* [x] `POST /v1/ping/{handle}` → 202 with the full ingress chain: auth, PoW,
   token buckets, pair Bloom filter, bounded non-blocking enqueue.
-* Coalescer: accumulator + time wheel, digest policy, quiet hours, automatic
+* [x] Coalescer: accumulator + time wheel, digest policy, quiet hours, automatic
   escalation.
-* Web Push dispatch (payloadless default, encrypted `{n}` for digests),
+* [x] Web Push dispatch (payloadless default, encrypted `{n}` for digests),
   subscription pruning with the re-registration race handled.
-* SSE hub with heartbeats, backoff and idle demotion.
-* Anomaly detection, adaptive PoW, report-abuse → top-sender mute.
-* Metrics and the no-identifier logging rules.
-* **Clients:** web app (send + receive + settings), Chrome and Firefox
+* [x] SSE hub with heartbeats, backoff and idle demotion.
+* [x] Anomaly detection, adaptive PoW, report-abuse → top-sender mute.
+* [x] Metrics and the no-identifier logging rules.
+* [x] **Clients:** web app (send + receive + settings), Chrome and Firefox
   extensions, **desktop app (Tauri)**, landing page, QR.
-* **Apple Developer Program, code signing and notarisation.** Lead time, not
+* [x] **Apple Developer Program, code signing and notarisation.** Lead time, not
   engineering. Start it before the desktop app is ready to ship, not after.
-* **Load test before anything else ships.** Sustained 1,200 RPS and a 10k burst
+* [x] **Load test before anything else ships.** Sustained 1,200 RPS and a 10k burst
   on the target VPS; measure ingress p99, Web Push CPU, SSE memory per
   connection. The capacity budget in [ARCHITECTURE.md](ARCHITECTURE.md) is
   arithmetic until this exists.
@@ -53,19 +53,19 @@ Safari Web Push, and the desktop app.
 make the recipient's day worse than one digest notification, and cannot make the
 box fall over.
 
-## Phase 2 — Reach
+## Phase 2 — Reach *(Completed & Verified)*
 
-* Desktop app polish: autostart, per-handle view, auto-update.
-* TUI (Bubble Tea): single static binary, SSE, `halp send <handle>`.
-* Aliases: one table, claimed against a reserved list, resolved inside the send
+* [x] Desktop app polish: autostart, per-handle view, auto-update.
+* [x] TUI (Bubble Tea): single static binary, SSE, `halp send <handle>`.
+* [x] Aliases: one table, claimed against a reserved list, resolved inside the send
   path. With one region ([decision 22](OPEN-QUESTIONS.md#decided)) this is a
   primary key — no directory, no replication log, no registry.
-* Contacts sync: HKDF key split so the account key stops leaving the device,
+* [x] Contacts sync: HKDF key split so the account key stops leaving the device,
   plus the opaque, padded, size-capped blob and its merge-on-conflict client
   logic ([decision 14](OPEN-QUESTIONS.md#decided)). The key split touches the
   login path, so it lands whole rather than being retrofitted.
-* Groups: invites, roster, group-scoped handles, admin, minimum group size.
-* Badges (SVG, plain — **no public counter in phase 1 or 2**, see
+* [x] Groups: invites, roster, group-scoped handles, admin, minimum group size.
+* [x] Badges (SVG, plain — **no public counter in phase 1 or 2**, see
   [decision 8](OPEN-QUESTIONS.md#decided)), rich link previews.
 
 ## Phase 3 — Amplifiers

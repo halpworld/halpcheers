@@ -14,9 +14,9 @@ reason, no sender identity. One fixed idea, delivered.
 
 ## Status
 
-Design phase. No code yet. The full plan lives in [`docs/`](docs/), and
-Phase 1 is broken into parallel tracks in the issue tracker — see
-[docs/AGENT-WORKFLOW.md](docs/AGENT-WORKFLOW.md).
+**Phase 1 (Core Loop, Security Hardening, Load & Red-Team Suites, Release Pipeline)** and **Phase 2 — Reach (Client-Encrypted Contacts Sync, Groups, Go TUI Client, Browser Extension, and Desktop App Polish)** are fully implemented and verified against all invariants and exit criteria.
+
+The full design and specification live in [`docs/`](docs/):
 
 | Doc | What's in it |
 | --- | --- |
@@ -36,10 +36,47 @@ Phase 1 is broken into parallel tracks in the issue tracker — see
 
 Engineering rules that must not be violated are in [AGENTS.md](AGENTS.md).
 
+## Quickstart & Verification
+
+Halp is written in pure Go (`CGO_ENABLED=0`) with zero external runtime C dependencies.
+
+### Running the Server
+
+```bash
+# Start the HTTP server with SQLite (listens on :8080 by default)
+go run ./server/cmd/halpd
+```
+
+### Running the TUI Client
+
+```bash
+# Launch interactive Bubble Tea TUI
+go run ./tui/cmd/halp
+
+# Send an anonymous ping via CLI
+go run ./tui/cmd/halp send <handle>
+```
+
+### Verification & Test Suites
+
+```bash
+# Run unit and integration tests across modules with Go race detector
+go test -race ./server/... ./tui/... ./redteam/...
+# (or within each Go module directory: go test -race ./...)
+
+# Run AST static analyzer enforcing Invariant 9 (zero identifier leaks in logs/formatters)
+go run ./server/cmd/check-invariant9 ./server
+
+# Run hostile red-team adversarial suite (verifies all 9 invariants and abuse scenarios)
+go test -v -race ./redteam/...
+
+# Execute capacity and throughput load test harness
+go run ./loadtest -target http://localhost:8080 -rps 1200
+```
+
 ## Platforms
 
-Phase 1 targets **web, browser extensions (Chrome / Firefox) and the desktop
-app (macOS / Windows / Linux)**. The TUI follows in phase 2.
+Phase 1 and Phase 2 platforms are implemented: **web, browser extensions (Chrome / Firefox), desktop app (macOS / Windows / Linux via Tauri), and terminal (Go TUI)**.
 
 There is no Safari extension: the Push API inside Safari web extensions was the
 weakest assumption in the plan, so Safari users get the web app over Safari Web

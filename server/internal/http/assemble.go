@@ -32,29 +32,65 @@ func (a *sessionAuthAdapter) AuthenticateSession(ctx context.Context, token stri
 	return a.sessions.Lookup(token)
 }
 
-// sqliteBlockStore adapts *store.Store to the guard.BlockStore interface.
+type blockCacheKey struct {
+	sender core.AccountID
+	handle core.Handle
+}
+
+// sqliteBlockStore adapts *store.Store to the guard.BlockStore interface
+// with a bounded in-memory cache (10,000 entries) so hot-path IsBlocked checks
+// execute in O(1) memory after initial lookup.
 type sqliteBlockStore struct {
 	store *store.Store
+	mu    sync.RWMutex
+	cache map[blockCacheKey]bool
+}
+
+func newSQLiteBlockStore(st *store.Store) *sqliteBlockStore {
+	return &sqliteBlockStore{
+		store: st,
+		cache: make(map[blockCacheKey]bool, 1024),
+	}
 }
 
 func (s *sqliteBlockStore) RecordBlock(ctx context.Context, sender core.AccountID, handle core.Handle, day core.Day) error {
 	if s.store == nil {
 		return nil
 	}
-	return s.store.Write(ctx, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `
+	err := s.store.Write(ctx, func(tx *sql.Tx) error {
+		_, txErr := tx.ExecContext(ctx, `
 			INSERT INTO blocks (sender_account_id, handle, created_day)
 			VALUES (?, ?, ?)
 			ON CONFLICT(sender_account_id, handle) DO NOTHING
 		`, sender.Int64(), handle.Raw(), day.Int())
-		return err
+		return txErr
 	})
+	if err == nil {
+		s.mu.Lock()
+		if len(s.cache) >= 10_000 {
+			for k := range s.cache {
+				delete(s.cache, k)
+				break
+			}
+		}
+		s.cache[blockCacheKey{sender: sender, handle: handle}] = true
+		s.mu.Unlock()
+	}
+	return err
 }
 
 func (s *sqliteBlockStore) IsBlocked(ctx context.Context, sender core.AccountID, handle core.Handle) (bool, error) {
 	if s.store == nil {
 		return false, nil
 	}
+	key := blockCacheKey{sender: sender, handle: handle}
+	s.mu.RLock()
+	if blocked, ok := s.cache[key]; ok {
+		s.mu.RUnlock()
+		return blocked, nil
+	}
+	s.mu.RUnlock()
+
 	var count int
 	err := s.store.ReadDB().QueryRowContext(ctx, `
 		SELECT COUNT(1) FROM blocks WHERE sender_account_id = ? AND handle = ?
@@ -62,7 +98,19 @@ func (s *sqliteBlockStore) IsBlocked(ctx context.Context, sender core.AccountID,
 	if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	blocked := count > 0
+
+	s.mu.Lock()
+	if len(s.cache) >= 10_000 {
+		for k := range s.cache {
+			delete(s.cache, k)
+			break
+		}
+	}
+	s.cache[key] = blocked
+	s.mu.Unlock()
+
+	return blocked, nil
 }
 
 // Assembly manages the full collection of services and background pumps
@@ -91,7 +139,7 @@ func AssembleDependencies(ctx context.Context, cfg *config.Config, st *store.Sto
 		metrics = obs.NewMetrics()
 	}
 
-	blockStore := &sqliteBlockStore{store: st}
+	blockStore := newSQLiteBlockStore(st)
 	guardSvc := guard.NewService(guard.Config{
 		BlockStore: blockStore,
 		Metrics:    metrics,
@@ -137,6 +185,8 @@ func AssembleDependencies(ctx context.Context, cfg *config.Config, st *store.Sto
 	subsH := NewSubscriptionsHandlerWithDeps(st, authAdapter)
 	streamH := NewStreamHandlerWithDeps(streamHub, authAdapter, coalescer)
 	settingsH := NewSettingsHandlerWithDeps(st, authAdapter, guardSvc)
+	groupsH := NewGroupsHandlerWithDeps(regionSvc, resolver, st, authAdapter, powEngine, cfg)
+	contactsH := NewContactsHandlerWithDeps(st, authAdapter, cfg)
 	publicH := NewConfiguredPublicHandler()
 
 	deps := RouterDeps{
@@ -147,14 +197,17 @@ func AssembleDependencies(ctx context.Context, cfg *config.Config, st *store.Sto
 		Subscriptions: subsH,
 		Stream:        streamH,
 		Settings:      settingsH,
+		Groups:        groupsH,
+		Contacts:      contactsH,
 		Public:        publicH,
-		MaxBodyBytes:  64 * 1024,
+		MaxBodyBytes:  128 * 1024,
 		ReqTimeout:    10 * time.Second,
 	}
 
 	if cfg != nil {
-		deps.MaxBodyBytes = int64(cfg.Reloadable().ContactsMaxBytes)
+		deps.MaxBodyBytes = int64(cfg.Reloadable().ContactsMaxBytes) * 2
 		deps.ReqTimeout = cfg.Startup.ShutdownDrainTimeout
+		resolver.SetMinGroupSize(cfg.Reloadable().GroupsMinSize)
 	}
 
 	assembly := &Assembly{

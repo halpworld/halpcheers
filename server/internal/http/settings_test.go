@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -402,7 +401,7 @@ func TestReportAbuseResponseUniformity(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			start := time.Now()
-			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/handles/%s/report-abuse", tc.handle), nil)
+			req := httptest.NewRequest(http.MethodPost, "/v1/handles/"+tc.handle+"/report-abuse", nil)
 			req.Header.Set("Authorization", "Bearer user-token")
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)

@@ -64,6 +64,13 @@ export interface GroupDTO {
   id: number;
   name: string;
   invite_code?: string;
+  role?: string;
+  display_name?: string;
+  my_handle?: string;
+  member_count?: number;
+  min_size?: number;
+  active?: boolean;
+  created_day?: number;
 }
 
 export interface GroupMemberDTO {
@@ -71,6 +78,13 @@ export interface GroupMemberDTO {
   note?: string;
   handle: string;
   role?: string;
+}
+
+export interface GroupRosterResponse {
+  members: GroupMemberDTO[];
+  member_count: number;
+  min_size: number;
+  active: boolean;
 }
 
 export class HalpApiError extends Error {
@@ -358,8 +372,8 @@ export class HalpClient {
   // Groups (docs/API.md § Groups)
   // ---------------------------------------------------------------------------
 
-  async createGroup(name: string): Promise<{ group_id: number; invite_code: string }> {
-    return this.request('POST', '/v1/groups', { name });
+  async createGroup(name: string, displayName?: string, note?: string): Promise<{ group_id: number; invite_code: string; my_handle?: string; min_size?: number; active?: boolean }> {
+    return this.request('POST', '/v1/groups', { name, display_name: displayName, note });
   }
 
   async listGroups(): Promise<GroupDTO[]> {
@@ -372,8 +386,18 @@ export class HalpClient {
     return res.members || [];
   }
 
-  async joinGroup(inviteCode: string, displayName: string): Promise<{ group_id: number; my_handle: string }> {
-    return this.request('POST', '/v1/groups/join', { invite_code: inviteCode, display_name: displayName });
+  async getGroupRoster(groupId: number): Promise<GroupRosterResponse> {
+    const res = await this.request<GroupRosterResponse>('GET', `/v1/groups/${groupId}/members`);
+    return {
+      members: res.members || [],
+      member_count: res.member_count ?? (res.members ? res.members.length : 0),
+      min_size: res.min_size ?? 5,
+      active: res.active ?? false,
+    };
+  }
+
+  async joinGroup(inviteCode: string, displayName: string, note?: string): Promise<{ group_id: number; my_handle: string }> {
+    return this.request('POST', '/v1/groups/join', { invite_code: inviteCode, display_name: displayName, note });
   }
 
   async leaveGroup(groupId: number): Promise<void> {
@@ -388,7 +412,7 @@ export class HalpClient {
     return this.request('POST', `/v1/groups/${groupId}/invite`);
   }
 
-  async updateGroup(groupId: number, patch: { name?: string; policy?: Record<string, unknown> }): Promise<void> {
+  async updateGroup(groupId: number, patch: { name?: string; policy?: Record<string, unknown>; member_handle?: string; role?: string; transfer_owner_handle?: string }): Promise<void> {
     await this.request('PATCH', `/v1/groups/${groupId}`, patch);
   }
 
@@ -400,12 +424,12 @@ export class HalpClient {
   // Contacts (docs/API.md § Contacts)
   // ---------------------------------------------------------------------------
 
-  async getContacts(): Promise<{ version: number; blob: string }> {
+  async getContacts(): Promise<{ version: number; blob: string; updated_day?: number }> {
     return this.request('GET', '/v1/contacts');
   }
 
-  async updateContacts(blob: string, version: number): Promise<void> {
-    await this.request('PUT', '/v1/contacts', { blob }, {
+  async updateContacts(blob: string, version: number): Promise<{ version: number; updated_day?: number }> {
+    return this.request('PUT', '/v1/contacts', { blob }, {
       'If-Match': version.toString(),
     });
   }

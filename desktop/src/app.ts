@@ -9,10 +9,13 @@
  * - Native OS notifications matching UI.md §8 copy bands (zero body, zero sender).
  * - System tray integration with arrival counter.
  * - Quick send with 300 ms floor and two-state button ("Sending...", "Sent.").
+ * - Phase 2 polish: Per-handle view (create, pause/resume, burn with verbatim copy),
+ *   launch-at-login toggle (offered, never default-on), and auto-update check.
  */
 
 import {
   HalpClient,
+  HandleDTO,
   TransportManager,
   TransportStatus,
   generateAccountKey,
@@ -24,6 +27,10 @@ import { DesktopBridge, createDesktopBridge } from './bridge.js';
 const MIN_LATENCY_FLOOR_MS = 300;
 const DEFAULT_ORIGIN = 'https://halp.to';
 
+export function formatBurnPrompt(handle: string): string {
+  return `Burn ${handle}? Anyone with this link or QR code loses the ability to reach you, immediately and permanently. The handle is never reissued and this cannot be undone. Your other handles are unaffected.`;
+}
+
 export class DesktopApp {
   private bridge: DesktopBridge;
   private client: HalpClient;
@@ -32,6 +39,7 @@ export class DesktopApp {
   private authSecret: string | null = null;
   private todayCount = 0;
   private defaultHandle = '';
+  public handles: HandleDTO[] = [];
 
   constructor(bridge?: DesktopBridge, client?: HalpClient) {
     this.bridge = bridge ?? createDesktopBridge();
@@ -92,8 +100,99 @@ export class DesktopApp {
     if (keyWall) keyWall.style.display = 'none';
     if (homeView) homeView.style.display = 'flex';
 
+    await this.syncAutostartState();
     this.bindHomeEvents();
     this.startTransport();
+    await this.refreshHandles().catch(() => {});
+  }
+
+  private async syncAutostartState(): Promise<void> {
+    const autostartCheck = document.getElementById('autostart-check') as HTMLInputElement | null;
+    if (!autostartCheck) return;
+
+    try {
+      const enabled = await this.bridge.getAutostart();
+      autostartCheck.checked = enabled;
+    } catch {
+      autostartCheck.checked = false;
+    }
+
+    autostartCheck.onchange = async () => {
+      await this.bridge.setAutostart(autostartCheck.checked);
+    };
+  }
+
+  async refreshHandles(): Promise<HandleDTO[]> {
+    const list = await this.client.listHandles();
+    this.handles = list;
+
+    const handleDisplay = document.getElementById('handle-display');
+    if (handleDisplay && list.length > 0) {
+      handleDisplay.textContent = list[0].handle;
+    }
+
+    const handleListEl = document.getElementById('handle-list');
+    if (handleListEl) {
+      handleListEl.textContent = list
+        .map((h) => `${h.handle} (${h.label || h.kind})${h.paused ? ' [paused]' : ''}`)
+        .join('\n');
+    }
+
+    return list;
+  }
+
+  async handleCreateHandle(
+    kind: 'personal' | 'social' | 'stream' = 'personal',
+    label = ''
+  ): Promise<HandleDTO> {
+    const created = await this.client.createHandle(label, kind);
+    await this.refreshHandles().catch(() => {
+      this.handles.push(created);
+    });
+    return created;
+  }
+
+  async handleTogglePause(handle: string, paused: boolean): Promise<void> {
+    await this.client.updateHandle(handle, { paused });
+    const idx = this.handles.findIndex((h) => h.handle === handle);
+    if (idx !== -1) {
+      this.handles[idx] = { ...this.handles[idx], paused };
+    }
+  }
+
+  async handleBurnHandle(handle: string, typedConfirmation: string): Promise<boolean> {
+    if (typedConfirmation !== handle) {
+      return false;
+    }
+    await this.client.deleteHandle(handle);
+    this.handles = this.handles.filter((h) => h.handle !== handle);
+    const handleListEl = document.getElementById('handle-list');
+    if (handleListEl) {
+      handleListEl.textContent = this.handles
+        .map((h) => `${h.handle} (${h.label || h.kind})${h.paused ? ' [paused]' : ''}`)
+        .join('\n');
+    }
+    return true;
+  }
+
+  async handleCheckForUpdates(): Promise<string> {
+    const statusEl = document.getElementById('update-status');
+    try {
+      const res = await this.bridge.checkForUpdates();
+      const msg = res.updateAvailable
+        ? `Update available: v${res.version ?? 'latest'}`
+        : 'Halp is up to date.';
+      if (statusEl) {
+        statusEl.textContent = msg;
+      }
+      return msg;
+    } catch {
+      const msg = 'Unable to check for updates right now.';
+      if (statusEl) {
+        statusEl.textContent = msg;
+      }
+      return msg;
+    }
   }
 
   private bindHomeEvents(): void {
@@ -102,6 +201,7 @@ export class DesktopApp {
     const targetInput = document.getElementById('target-input') as HTMLInputElement | null;
     const clearKeyBtn = document.getElementById('clear-key-btn') as HTMLButtonElement | null;
     const copyHandleBtn = document.getElementById('copy-handle-btn') as HTMLButtonElement | null;
+    const checkUpdateBtn = document.getElementById('check-update-btn') as HTMLButtonElement | null;
 
     if (sendForm && sendBtn && targetInput) {
       sendForm.onsubmit = async (e) => {
@@ -136,6 +236,12 @@ export class DesktopApp {
             copyHandleBtn.textContent = 'Copy Link';
           }, 1500);
         }
+      };
+    }
+
+    if (checkUpdateBtn) {
+      checkUpdateBtn.onclick = async () => {
+        await this.handleCheckForUpdates();
       };
     }
   }

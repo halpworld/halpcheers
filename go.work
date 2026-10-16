@@ -4,4 +4,5 @@ use (
 	./loadtest
 	./redteam
 	./server
+	./tui
 )

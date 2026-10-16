@@ -165,8 +165,70 @@ func (s *Service) BurnHandle(ctx context.Context, accountID core.AccountID, hand
 	})
 }
 
+// RecordBurned records a handle as burned in memory and invalidates the resolver cache.
+func (s *Service) RecordBurned(handle core.Handle) {
+	s.burnedHandles.Store(handle.Raw(), true)
+	if s.resolver != nil {
+		s.resolver.Invalidate(handle.Raw())
+	}
+}
+
 // IsBurned reports whether a handle has been permanently burned.
 func (s *Service) IsBurned(handle core.Handle) bool {
 	_, burned := s.burnedHandles.Load(handle.Raw())
 	return burned
+}
+
+// SweepInactiveAliases releases aliases on accounts with no activity for releaseMonths (default 12 months).
+// See docs/IDENTITY.md § 3 and docs/OPEN-QUESTIONS.md #10.
+func (s *Service) SweepInactiveAliases(ctx context.Context, releaseMonths int) (int64, error) {
+	if s.store == nil {
+		return 0, nil
+	}
+	if releaseMonths <= 0 {
+		releaseMonths = 12
+	}
+	cutoffDay := core.Today().AddDays(-releaseMonths * 30).Int()
+
+	var releasedAliases []string
+	rows, err := s.store.ReadDB().QueryContext(ctx, `
+		SELECT a.alias
+		FROM aliases a
+		JOIN accounts acc ON a.account_id = acc.id
+		WHERE acc.last_seen_day <= ?
+	`, cutoffDay)
+	if err == nil {
+		for rows.Next() {
+			var al string
+			if err := rows.Scan(&al); err == nil {
+				releasedAliases = append(releasedAliases, al)
+			}
+		}
+		rows.Close()
+	}
+
+	var deleted int64
+	err = s.store.Write(ctx, func(tx *sql.Tx) error {
+		res, execErr := tx.ExecContext(ctx, `
+			DELETE FROM aliases
+			WHERE account_id IN (
+				SELECT id FROM accounts WHERE last_seen_day <= ?
+			)
+		`, cutoffDay)
+		if execErr != nil {
+			return execErr
+		}
+		deleted, _ = res.RowsAffected()
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	if s.resolver != nil {
+		for _, al := range releasedAliases {
+			s.resolver.Invalidate(al)
+		}
+	}
+	return deleted, nil
 }

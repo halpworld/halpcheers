@@ -119,8 +119,22 @@ func (h *PingHandler) SendPing(w http.ResponseWriter, r *http.Request) {
 	var kind core.HandleKind = core.HandleKindPersonal
 
 	if h.resolver != nil {
+		type detailedResolver interface {
+			ResolveDetailed(ctx context.Context, target string) (core.AccountID, core.Handle, core.HandleKind, int64, core.PolicyMode, bool)
+			IsGroupMember(ctx context.Context, groupID int64, accountID core.AccountID) bool
+		}
 		var resolved bool
-		recipientID, handle, resolved = h.resolver.Resolve(r.Context(), target)
+		var groupID int64
+		if dr, ok := h.resolver.(detailedResolver); ok {
+			recipientID, handle, kind, groupID, _, resolved = dr.ResolveDetailed(r.Context(), target)
+			if resolved && kind == core.HandleKindGroup && groupID > 0 {
+				if !dr.IsGroupMember(r.Context(), groupID, senderID) {
+					resolved = false
+				}
+			}
+		} else {
+			recipientID, handle, resolved = h.resolver.Resolve(r.Context(), target)
+		}
 		if !resolved {
 			// INVARIANT 7: Unknown target, paused, or missing returns 202 Accepted
 			WriteUniformAccepted(w)

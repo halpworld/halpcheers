@@ -7,3 +7,4 @@ export * from './pow.js';
 export * from './client.js';
 export * from './transport.js';
 export * from './validation.js';
+export * from './contacts.js';

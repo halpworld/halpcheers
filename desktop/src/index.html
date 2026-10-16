@@ -35,7 +35,7 @@
       <button id="key-continue-btn" disabled>Continue</button>
     </section>
 
-    <!-- Screen 2: Home View (UI.md §3) -->
+    <!-- Screen 2: Home View (UI.md §3 & §9) -->
     <section id="home-view" style="display: none; flex-direction: column; gap: 20px;">
       <!-- Arrival Counter Card -->
       <div class="card" aria-live="polite">
@@ -61,11 +61,24 @@
         </form>
       </div>
 
-      <!-- Primary Handle Display -->
+      <!-- Per-Handle View (UI.md §5 & §9) -->
       <div class="card" style="font-size: 0.875rem;">
-        <div style="font-weight: 500; margin-bottom: 4px;">Your handle</div>
-        <div id="handle-display" style="font-family: var(--font-mono); color: var(--text-muted); margin-bottom: 12px;">Loading...</div>
+        <div style="font-weight: 500; margin-bottom: 4px;">Your handles</div>
+        <div id="handle-display" style="font-family: var(--font-mono); color: var(--text-muted); margin-bottom: 8px;">Loading...</div>
+        <pre id="handle-list" style="font-family: var(--font-mono); color: var(--text-muted); margin-bottom: 12px; white-space: pre-wrap;"></pre>
         <button type="button" id="copy-handle-btn" class="button-secondary" style="font-size: 0.8rem; padding: 6px 12px;">Copy Link</button>
+      </div>
+
+      <!-- Desktop Preferences: Launch at Login & Auto-Update (UI.md §9) -->
+      <div class="card" style="font-size: 0.875rem; display: flex; flex-direction: column; gap: 10px;">
+        <label class="checkbox-row">
+          <input type="checkbox" id="autostart-check">
+          <span>Launch at login</span>
+        </label>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span id="update-status" style="color: var(--text-muted); font-size: 0.8rem;">Up to date</span>
+          <button type="button" id="check-update-btn" class="button-secondary" style="font-size: 0.8rem; padding: 6px 12px;">Check for Updates</button>
+        </div>
       </div>
 
       <!-- Logout / Clear Key Button -->
