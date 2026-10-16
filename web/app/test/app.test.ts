@@ -432,3 +432,42 @@ test('Phase 2: Groups section displays min_size (< 5 members) notice per docs/GR
   assert.strictEqual(notice.textContent, COPY.groups.minSizeNotice);
 });
 
+// -----------------------------------------------------------------------------
+// 9. Phase 3 — Streamer Handle & OBS Overlay UI
+// -----------------------------------------------------------------------------
+
+test('Phase 3: Stream handle row renders .stream-overlay-controls and streamer preset copy', () => {
+  const mockContainer = new MockElement('div') as unknown as HTMLElement;
+  const app = new HalpApp(mockContainer);
+
+  const streamHandle: any = {
+    handle: 'e7k4p2m9qx3va',
+    kind: 'stream',
+    paused: false,
+    created_day: 19999,
+  };
+
+  const row = app.renderHandleRow(streamHandle) as unknown as MockElement;
+  const overlayControls = row.querySelector('.stream-overlay-controls');
+  assert.ok(overlayControls !== null, 'stream handle must render .stream-overlay-controls');
+
+  const badge = overlayControls.querySelector('.caption');
+  assert.ok(badge !== null, 'stream overlay controls must contain caption badge');
+  assert.strictEqual(badge.textContent, 'Streamer preset (60s digest, OBS overlay)');
+
+  const copyBtn = overlayControls.children.find((c: any) => c.textContent === 'Copy OBS Overlay URL');
+  assert.ok(copyBtn !== undefined, 'stream overlay controls must have Copy OBS Overlay URL button');
+  assert.ok(copyBtn.className.includes('btn-secondary'), 'button must have btn-secondary class');
+
+  // Verify non-stream handle does not render .stream-overlay-controls
+  const personalHandle: any = {
+    handle: 'e7k4p2m9qx3vb',
+    kind: 'personal',
+    paused: false,
+    created_day: 19999,
+  };
+  const personalRow = app.renderHandleRow(personalHandle) as unknown as MockElement;
+  assert.strictEqual(personalRow.querySelector('.stream-overlay-controls'), null, 'personal handle must not have overlay controls');
+});
+
+

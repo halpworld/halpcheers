@@ -23,6 +23,7 @@ import (
 type AccountID = core.AccountID
 type Handle = core.Handle
 type HandleKind = core.HandleKind
+type TransparencyReport = obs.TransparencyReport
 
 const (
 	HandleKindPersonal = core.HandleKindPersonal
@@ -30,6 +31,11 @@ const (
 	HandleKindGroup    = core.HandleKindGroup
 	HandleKindStream   = core.HandleKindStream
 )
+
+// GenerateTransparencyReport generates a public aggregate transparency report.
+func GenerateTransparencyReport(ctx context.Context, db *sql.DB) (*TransparencyReport, error) {
+	return obs.GenerateTransparencyReport(ctx, db)
+}
 
 // Environment represents an assembled running Halp instance for testing and load verification.
 type Environment struct {
@@ -211,3 +217,9 @@ func (e *Environment) RecordBlock(senderID core.AccountID, handle core.Handle) e
 		return err
 	})
 }
+
+// GenerateTransparencyReport builds an aggregate transparency report from the current environment database.
+func (e *Environment) GenerateTransparencyReport(ctx context.Context) (*TransparencyReport, error) {
+	return obs.GenerateTransparencyReport(ctx, e.Store.ReadDB())
+}
+

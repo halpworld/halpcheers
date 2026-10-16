@@ -638,11 +638,37 @@ Decided: desktop client polish in Tauri (`desktop/`) satisfies platform and safe
 2. **Handle management & burn dialog**: Dedicated views for creating, pausing, and burning handles. Deleting/burning a handle requires typing the exact verbatim confirmation phrase (`burn <handle>`) as specified in `docs/UI.md` §4, preventing accidental destruction of permanent handles.
 3. **Auto-update security**: The Tauri updater endpoint is configured to fetch signed update manifests over HTTPS with Ed25519 signature verification against public keys embedded at build time.
 
+### 51. Phase 3 OBS Overlay & Streamer Handle Presets → **read-only revocable tokens, 60s digest preset, auto-escalation, clean browser source**
+
+Decided: live streamer integration is implemented via dedicated streamer handle presets (`kind: 'stream'`) and revocable read-only overlay tokens connecting to `GET /overlay/{token}`:
+1. **Decoupled token lifecycle**: The OBS browser source URL uses an ephemeral, revocable overlay token rather than the public handle or account key. If an overlay URL is accidentally revealed on stream, the broadcaster can instantly revoke and regenerate the token without burning or changing their public appreciation handle.
+2. **Digest-driven fan-out**: Streamer handles default to a 60-second digest window and automatic widening during raids/spikes, animating coalesced counts (e.g. "37 people appreciate you") rather than triggering 37 concurrent browser alerts or audio cues (preserving client CPU and viewer UX per `docs/SHARING.md` § Live streaming).
+3. **Web UI integration**: The web application renders `.stream-overlay-controls` on streamer handles with a copy action and explicit preset indication.
+
+### 52. Phase 3 Twitch/YouTube Chat Bot → **thin API client, bounded user cooldown cache, zero special server primitives**
+
+Decided: the official live chat bot (`tui/cmd/halp-bot`) is implemented in pure Go as a thin client over the public HTTP API, requiring zero dedicated server endpoints:
+1. **Command triggers**: Listens to chat feeds (Twitch IRC PRIVMSG with/without IRCv3 `@tags`, and YouTube chat streams), triggering on `!halp`, `!appreciate`, and `!cheers` (case-insensitive) to post the streamer's appreciation link (`https://halp.to/h/{target}` or `https://halp.to/@{alias}`).
+2. **Two-tier cooldowns**: Enforces a 15-second channel cooldown and a 60-second per-user cooldown to prevent chat spam and griefing during high-velocity streams.
+3. **Bounded memory guarantees (Invariant 8)**: Per-user cooldown timestamps are stored in an in-memory map strictly bounded to `MaxTrackedUsers = 10,000`. Expired entries are pruned upon reaching capacity, followed by LRU eviction of the oldest entry, guaranteeing fixed memory footprint during hostile raids.
+4. **Invariant 9 compliance**: Zero user identifiers or handles are passed into logging or formatting primitives.
+
+### 53. Phase 3 Public Transparency Report & Warrant Canary → **architectural impossibility guarantees, bi-annual warrant canary, aggregate Prometheus metrics**
+
+Decided: the public transparency posture is formalized in `docs/TRANSPARENCY.md`:
+1. **Architectural impossibility disclosures**: Documents why Halp is structurally incapable of producing message records (Invariant 1: no `messages`, `pings`, or audit tables exist in SQLite or memory) or sender identities (Invariant 6: anonymous Hashcash PoW ingress, ephemeral Bloom filters and Count-Min sketches). Subpoenas or warrants cannot compel production of data that is never collected or stored.
+2. **Warrant canary**: Publishes a bi-annually updated warrant canary certifying zero National Security Letters, FISA court orders, gag orders, or demands for backdoors/encryption keys.
+3. **Aggregate non-identifying metrics**: System health and transparency are verified via Prometheus counters (`halp_pings_ingress_total`, `halp_pings_dispatched_total`, `halp_db_accounts_total`) with zero personal identifiers.
+
 | Decision | Topic | Summary |
 | --- | --- | --- |
 | 47 | Phase 2 Contacts Sync | `GET/PUT/DELETE /v1/contacts` with `If-Match` optimistic concurrency, 4 KiB boundary padding before AES-256-GCM encryption under `HKDF-SHA256(account_key, "halp/contacts/v1")`, 64 KiB ceiling, and CRDT set-union merge where `deleted: true` wins. |
 | 48 | Phase 2 Groups | `POST/GET/PATCH/DELETE /v1/groups*`, `groups.min_size = 5` floor disabling group-scoped handle resolution below 5 members, group membership verification on `POST /v1/ping/{handle}`, automatic handle burn on leave/remove, owner promotion to longest-standing member, and 10 distinct group members/day sender spray cap via `PairCascade`. |
 | 49 | Phase 2 Go TUI Client | `tui/cmd/halp`, pure Go `CGO_ENABLED=0`, Bubble Tea Elm-architecture `Init/Update/View` state machine, SSE streaming with `event: demote` fallback to `GET /v1/pending`, optional terminal bell `\a`, and `halp send <handle>` with 300 ms latency floor. |
 | 50 | Phase 2 Desktop App Polish | launch-at-login offered and never default-on per `docs/UI.md` §9, per-handle create/pause/burn view with verbatim burn prompt, and Tauri updater endpoint configuration. |
+| 51 | Phase 3 OBS Overlay & Streamer Presets | `GET /overlay/{token}`, revocable read-only SSE overlay tokens decoupled from handles, 60s digest window preset, and `.stream-overlay-controls` in web UI. |
+| 52 | Phase 3 Twitch/YouTube Chat Bot | `tui/cmd/halp-bot`, thin client over public API, `!halp`/`!appreciate`/`!cheers` commands, 15s channel cooldown, 60s user cooldown with bounded map (`MaxTrackedUsers = 10,000`) per Invariant 8, and Invariant 9 compliance. |
+| 53 | Phase 3 Public Transparency Report | `docs/TRANSPARENCY.md`, warrant canary, architectural impossibility proofs under Invariants 1 & 6, and aggregate non-identifying Prometheus metrics. |
+
 
 

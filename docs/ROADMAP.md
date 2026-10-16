@@ -68,11 +68,12 @@ box fall over.
 * [x] Badges (SVG, plain — **no public counter in phase 1 or 2**, see
   [decision 8](OPEN-QUESTIONS.md#decided)), rich link previews.
 
-## Phase 3 — Amplifiers
+## Phase 3 — Amplifiers *(Completed & Verified)*
 
-* OBS overlay with revocable tokens; streamer handle presets.
-* Twitch/YouTube chat bot as a thin API client.
-* Second region, **only if warranted**, and costed honestly rather than
+* [x] OBS overlay with revocable tokens; streamer handle presets.
+* [x] Twitch/YouTube chat bot as a thin API client.
+* [ ] Second region, **only if warranted** (parked in [DISCOVERY.md](DISCOVERY.md)
+  per Decision 22; single EU region `eu-1` remains canonical). Costed honestly rather than
   assumed. It is not a deployment: it adds peer routing, alias replication, the
   `halp-registry` deployable, a roster/mirror split in the group schema,
   cross-border erasure reconciliation, and a privacy review that replaces the
@@ -82,7 +83,7 @@ box fall over.
 
   Phase 1 pays exactly one thing forward for this: the handle region prefix,
   which cannot be retrofitted onto handles already printed on stickers.
-* Public transparency report.
+* [x] Public transparency report.
 
 ## Phase 4 — Mobile, if feasible
 

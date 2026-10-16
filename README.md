@@ -14,7 +14,7 @@ reason, no sender identity. One fixed idea, delivered.
 
 ## Status
 
-**Phase 1 (Core Loop, Security Hardening, Load & Red-Team Suites, Release Pipeline)** and **Phase 2 — Reach (Client-Encrypted Contacts Sync, Groups, Go TUI Client, Browser Extension, and Desktop App Polish)** are fully implemented and verified against all invariants and exit criteria.
+**Phase 1 (Core Loop, Security Hardening, Load & Red-Team Suites, Release Pipeline)**, **Phase 2 — Reach (Client-Encrypted Contacts Sync, Groups, Go TUI Client, Browser Extension, and Desktop App Polish)**, and **Phase 3 — Amplifiers (OBS Overlay with Revocable Tokens, Twitch/YouTube Chat Bot, and Public Transparency Report)** are fully implemented and verified against all invariants and exit criteria.
 
 The full design and specification live in [`docs/`](docs/):
 
@@ -27,6 +27,7 @@ The full design and specification live in [`docs/`](docs/):
 | [docs/DISCOVERY.md](docs/DISCOVERY.md) | Finding people, contacts, and why there is no lookup endpoint |
 | [docs/GROUPS.md](docs/GROUPS.md) | Teams and group-scoped handles |
 | [docs/SHARING.md](docs/SHARING.md) | Links, QR, badges, live-stream overlays |
+| [docs/TRANSPARENCY.md](docs/TRANSPARENCY.md) | Public transparency report, warrant canary, architectural impossibility |
 | [docs/PRIVACY.md](docs/PRIVACY.md) | GDPR posture and data inventory |
 | [docs/API.md](docs/API.md) | HTTP surface and SQLite schema |
 | [docs/UI.md](docs/UI.md) | UI and UX spec — copy, states, what no screen may show |
@@ -57,6 +58,16 @@ go run ./tui/cmd/halp
 go run ./tui/cmd/halp send <handle>
 ```
 
+### Running the Chat Bot (`halp-bot`)
+
+```bash
+# Run halp-bot reading chat stream from stdin
+go run ./tui/cmd/halp-bot --target <handle-or-@alias>
+
+# Connect directly to Twitch IRC over TLS
+go run ./tui/cmd/halp-bot --target <handle-or-@alias> --irc-channel #streamer
+```
+
 ### Verification & Test Suites
 
 ```bash
@@ -66,6 +77,7 @@ go test -race ./server/... ./tui/... ./redteam/...
 
 # Run AST static analyzer enforcing Invariant 9 (zero identifier leaks in logs/formatters)
 go run ./server/cmd/check-invariant9 ./server
+go run ./server/cmd/check-invariant9 ./tui
 
 # Run hostile red-team adversarial suite (verifies all 9 invariants and abuse scenarios)
 go test -v -race ./redteam/...
@@ -76,7 +88,7 @@ go run ./loadtest -target http://localhost:8080 -rps 1200
 
 ## Platforms
 
-Phase 1 and Phase 2 platforms are implemented: **web, browser extensions (Chrome / Firefox), desktop app (macOS / Windows / Linux via Tauri), and terminal (Go TUI)**.
+Platforms implemented: **web, browser extensions (Chrome / Firefox), desktop app (macOS / Windows / Linux via Tauri), terminal (Go TUI), Twitch/YouTube chat bot (`halp-bot`), and OBS live stream overlay (`/overlay/{token}`)**.
 
 There is no Safari extension: the Push API inside Safari web extensions was the
 weakest assumption in the plan, so Safari users get the web app over Safari Web

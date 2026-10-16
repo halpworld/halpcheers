@@ -2039,6 +2039,60 @@ export class HalpApp {
 
     row.appendChild(header);
 
+    if (h.kind === 'stream') {
+      const streamControls = document.createElement('div');
+      streamControls.className = 'stream-overlay-controls';
+
+      const badge = document.createElement('span');
+      badge.className = 'caption';
+      badge.textContent = 'Streamer preset (60s digest, OBS overlay)';
+
+      const copyOverlayBtn = document.createElement('button');
+      copyOverlayBtn.type = 'button';
+      copyOverlayBtn.className = 'btn btn-secondary';
+      copyOverlayBtn.textContent = 'Copy OBS Overlay URL';
+      copyOverlayBtn.onclick = async () => {
+        const token = (h.policy as Record<string, unknown> | undefined)?.overlay_token;
+        if (typeof token !== 'string' || !token) {
+          copyOverlayBtn.textContent = 'Rotate token first';
+          return;
+        }
+        const origin =
+          typeof window !== 'undefined' && window.location?.origin
+            ? window.location.origin
+            : 'https://halp.to';
+        const overlayUrl = `${origin}/overlay/${token}`;
+        if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          try {
+            await navigator.clipboard.writeText(overlayUrl);
+          } catch {
+            // fallback
+          }
+        }
+        copyOverlayBtn.textContent = 'Copied!';
+        setTimeout(() => {
+          copyOverlayBtn.textContent = 'Copy OBS Overlay URL';
+        }, 2000);
+      };
+
+      const rotateOverlayBtn = document.createElement('button');
+      rotateOverlayBtn.type = 'button';
+      rotateOverlayBtn.className = 'btn btn-secondary';
+      rotateOverlayBtn.textContent = 'Rotate Overlay Token';
+      rotateOverlayBtn.onclick = async () => {
+        await this.client.updateHandle(h.handle, {
+          policy: { rotate_overlay_token: true },
+        });
+        this.handles = await this.client.listHandles();
+        this.render();
+      };
+
+      streamControls.appendChild(badge);
+      streamControls.appendChild(copyOverlayBtn);
+      streamControls.appendChild(rotateOverlayBtn);
+      row.appendChild(streamControls);
+    }
+
     const actions = document.createElement('div');
     actions.className = 'button-group';
 

@@ -187,7 +187,7 @@ func AssembleDependencies(ctx context.Context, cfg *config.Config, st *store.Sto
 	settingsH := NewSettingsHandlerWithDeps(st, authAdapter, guardSvc)
 	groupsH := NewGroupsHandlerWithDeps(regionSvc, resolver, st, authAdapter, powEngine, cfg)
 	contactsH := NewContactsHandlerWithDeps(st, authAdapter, cfg)
-	publicH := NewConfiguredPublicHandler()
+	publicH := NewConfiguredPublicHandlerWithDeps(st, streamHub)
 
 	deps := RouterDeps{
 		Metrics:       metrics,

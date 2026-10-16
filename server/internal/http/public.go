@@ -1,11 +1,20 @@
 package http
 
 import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/halpworld/halpcheers/server/internal/core"
+	"github.com/halpworld/halpcheers/server/internal/store"
+	"github.com/halpworld/halpcheers/server/internal/stream"
 )
 
 // PublicHandler handles public, unauthenticated routes (/h/{handle}, /@{alias}, /badge/{handle}.svg, /overlay/{token}).
@@ -17,6 +26,8 @@ import (
 // INVARIANT 9: No identifier in any log line or metric label.
 type PublicHandler struct {
 	configured bool
+	store      *store.Store
+	streamHub  *stream.Hub
 }
 
 // NewPublicHandler creates a new unconfigured PublicHandler stub (returns 501).
@@ -27,6 +38,15 @@ func NewPublicHandler() *PublicHandler {
 // NewConfiguredPublicHandler creates a fully configured PublicHandler ready to serve.
 func NewConfiguredPublicHandler() *PublicHandler {
 	return &PublicHandler{configured: true}
+}
+
+// NewConfiguredPublicHandlerWithDeps creates a configured PublicHandler with store and streamHub dependencies.
+func NewConfiguredPublicHandlerWithDeps(st *store.Store, hub *stream.Hub) *PublicHandler {
+	return &PublicHandler{
+		configured: true,
+		store:      st,
+		streamHub:  hub,
+	}
 }
 
 const (
@@ -289,7 +309,349 @@ func (h *PublicHandler) BadgeSVG(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(rawSVG))
 }
 
-// Overlay serves GET /overlay/{token} (Phase 3 SSE overlay, stubs 501 in Phase 1).
+func isHex32(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func findFlusher(w http.ResponseWriter) http.Flusher {
+	if f, ok := w.(http.Flusher); ok {
+		return f
+	}
+	val := reflect.ValueOf(w)
+	for val.Kind() == reflect.Pointer || val.Kind() == reflect.Interface {
+		val = val.Elem()
+	}
+	if val.Kind() == reflect.Struct {
+		field := val.FieldByName("ResponseWriter")
+		if field.IsValid() && field.CanInterface() {
+			if inner, ok := field.Interface().(http.ResponseWriter); ok {
+				return findFlusher(inner)
+			}
+		}
+	}
+	return nil
+}
+
+type overlaySSEWriter struct {
+	http.ResponseWriter
+	flusher   http.Flusher
+	wroteInit bool
+}
+
+func (o *overlaySSEWriter) Flush() {
+	if o.flusher != nil {
+		o.flusher.Flush()
+	}
+}
+
+func (o *overlaySSEWriter) Write(p []byte) (int, error) {
+	if !o.wroteInit {
+		o.wroteInit = true
+		_, _ = o.ResponseWriter.Write([]byte(": ok\n\n"))
+	}
+	return o.ResponseWriter.Write(p)
+}
+
+const overlayHTMLTemplate = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Halp Overlay</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      background: transparent !important;
+      background-color: transparent !important;
+      color: #ffffff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .halp-card {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.75rem;
+      background: rgba(18, 18, 18, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+      color: #ffffff;
+      font-weight: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .style-pop-in {
+      position: fixed;
+      bottom: 40px;
+      left: 50%;
+      transform: translate(-50%, 20px) scale(0.95);
+      border-radius: 9999px;
+      padding: 0.875rem 2rem;
+      font-size: 1.25rem;
+    }
+    .style-pop-in.visible {
+      opacity: 1;
+      transform: translate(-50%, 0) scale(1);
+    }
+
+    .style-corner {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      transform: translateY(12px);
+      border-radius: 12px;
+      padding: 0.75rem 1.25rem;
+      font-size: 1rem;
+    }
+    .style-corner.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .style-meter {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translate(-50%, 16px);
+      border-radius: 16px;
+      padding: 1rem 1.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      min-width: 280px;
+      font-size: 1.125rem;
+    }
+    .style-meter.visible {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    .meter-track {
+      width: 100%;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 9999px;
+      overflow: hidden;
+    }
+    .meter-fill {
+      width: 0%;
+      height: 100%;
+      background: #0070f3;
+      border-radius: 9999px;
+      transition: width 0.3s ease;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .halp-card {
+        transition: opacity 0.1s ease !important;
+        transform: none !important;
+      }
+      .style-pop-in {
+        transform: translateX(-50%) !important;
+      }
+      .style-meter {
+        transform: translateX(-50%) !important;
+      }
+      .meter-fill {
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay-widget" class="halp-card style-{{STYLE}}">
+    <div id="overlay-text"></div>
+    {{METER_HTML}}
+  </div>
+  <script>
+    (function() {
+      var widget = document.getElementById("overlay-widget");
+      var textEl = document.getElementById("overlay-text");
+      var meterFill = document.getElementById("meter-fill");
+      var hideTimer = null;
+      var totalCount = 0;
+
+      var streamUrl = window.location.pathname + "?stream=1";
+      var es = new EventSource(streamUrl);
+
+      es.addEventListener("ping", function(e) {
+        try {
+          var payload = JSON.parse(e.data);
+          var n = parseInt(payload.n, 10) || 1;
+          totalCount += n;
+
+          var label = (n === 1) ? "Someone appreciates you." : (n + " people appreciate you.");
+          textEl.textContent = label;
+
+          if (meterFill) {
+            var pct = Math.min(100, totalCount * 10);
+            meterFill.style.width = pct + "%";
+          }
+
+          widget.classList.add("visible");
+          if (hideTimer) clearTimeout(hideTimer);
+          hideTimer = setTimeout(function() {
+            widget.classList.remove("visible");
+          }, 5000);
+        } catch (err) {}
+      });
+    })();
+  </script>
+</body>
+</html>`
+
+// Overlay serves GET /overlay/{token} (Phase 3 SSE overlay).
 func (h *PublicHandler) Overlay(w http.ResponseWriter, r *http.Request) {
-	NotImplemented(w, r)
+	if !h.configured {
+		NotImplemented(w, r)
+		return
+	}
+
+	rawTok := strings.TrimSpace(chi.URLParam(r, "token"))
+	if !isHex32(rawTok) {
+		WriteUniformNotFound(w)
+		return
+	}
+
+	if h.store == nil {
+		WriteUniformNotFound(w)
+		return
+	}
+
+	rawTokLower := strings.ToLower(rawTok)
+	var rawID int64
+	var policyStr string
+	err := h.store.ReadDB().QueryRowContext(
+		r.Context(),
+		"SELECT account_id, policy_json FROM handles WHERE kind = 'stream' AND paused = 0 AND LOWER(json_extract(policy_json, '$.overlay_token')) = ?",
+		rawTokLower,
+	).Scan(&rawID, &policyStr)
+	if err != nil {
+		WriteUniformNotFound(w)
+		return
+	}
+
+	var pol map[string]any
+	if err := json.Unmarshal([]byte(policyStr), &pol); err != nil {
+		WriteUniformNotFound(w)
+		return
+	}
+	tok, ok := pol["overlay_token"].(string)
+	if !ok || subtle.ConstantTimeCompare([]byte(strings.ToLower(tok)), []byte(rawTokLower)) != 1 {
+		WriteUniformNotFound(w)
+		return
+	}
+
+	targetAccountID := core.AccountID(rawID)
+	overlayStyle := "pop-in"
+	if s, ok := pol["overlay_style"].(string); ok && s != "" {
+		overlayStyle = s
+	}
+
+	if reqStyle := r.URL.Query().Get("style"); reqStyle != "" {
+		switch reqStyle {
+		case "pop-in", "meter", "corner":
+			overlayStyle = reqStyle
+		}
+	}
+
+	if r.URL.Query().Get("stream") == "1" || strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		flusher := findFlusher(w)
+		if flusher == nil {
+			http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+
+		if h.streamHub != nil {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("X-Accel-Buffering", "no")
+
+			streamCtx, cancelStream := context.WithCancel(r.Context())
+			defer cancelStream()
+
+			// Watchdog: terminate SSE stream if the overlay token is rotated/revoked or handle is paused
+			go func() {
+				checkTicker := time.NewTicker(2 * time.Second)
+				defer checkTicker.Stop()
+				for {
+					select {
+					case <-streamCtx.Done():
+						return
+					case <-checkTicker.C:
+						var count int
+						qErr := h.store.ReadDB().QueryRowContext(
+							streamCtx,
+							"SELECT COUNT(1) FROM handles WHERE kind = 'stream' AND paused = 0 AND LOWER(json_extract(policy_json, '$.overlay_token')) = ?",
+							rawTokLower,
+						).Scan(&count)
+						if qErr != nil || count == 0 {
+							cancelStream()
+							return
+						}
+					}
+				}
+			}()
+
+			wrapped := &overlaySSEWriter{
+				ResponseWriter: w,
+				flusher:        flusher,
+			}
+			h.streamHub.ServeHTTP(wrapped, r.WithContext(streamCtx), targetAccountID)
+			return
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, ": ok\n\n")
+		flusher.Flush()
+
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+				_, _ = fmt.Fprintf(w, "event: ka\ndata: {}\n\n")
+				flusher.Flush()
+			}
+		}
+	}
+
+	meterHTML := ""
+	if overlayStyle == "meter" {
+		meterHTML = `<div class="meter-track"><div id="meter-fill" class="meter-fill"></div></div>`
+	}
+	html := strings.ReplaceAll(overlayHTMLTemplate, "{{STYLE}}", overlayStyle)
+	html = strings.ReplaceAll(html, "{{METER_HTML}}", meterHTML)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(html))
 }

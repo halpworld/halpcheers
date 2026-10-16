@@ -2,7 +2,9 @@ package http
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -13,6 +15,14 @@ import (
 	"github.com/halpworld/halpcheers/server/internal/region"
 	"github.com/halpworld/halpcheers/server/internal/store"
 )
+
+func generateOverlayToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
 
 // SessionAuthenticator resolves an incoming session token to an AccountID.
 type SessionAuthenticator interface {
@@ -73,7 +83,7 @@ func (h *HandlesHandler) ListHandles(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.store.ReadDB().QueryContext(r.Context(),
-		"SELECT handle, label, kind, paused, created_day FROM handles WHERE account_id = ? ORDER BY created_day DESC",
+		"SELECT handle, label, kind, paused, created_day, policy_json FROM handles WHERE account_id = ? ORDER BY created_day DESC",
 		accountID.Int64())
 	if err != nil {
 		WriteUniformError(w, http.StatusInternalServerError, "internal_error")
@@ -82,11 +92,12 @@ func (h *HandlesHandler) ListHandles(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type handleDTO struct {
-		Handle     string `json:"handle"`
-		Label      string `json:"label,omitempty"`
-		Kind       string `json:"kind"`
-		Paused     bool   `json:"paused"`
-		CreatedDay int64  `json:"created_day"`
+		Handle     string         `json:"handle"`
+		Label      string         `json:"label,omitempty"`
+		Kind       string         `json:"kind"`
+		Paused     bool           `json:"paused"`
+		CreatedDay int64          `json:"created_day"`
+		Policy     map[string]any `json:"policy,omitempty"`
 	}
 
 	var handles []handleDTO
@@ -94,7 +105,8 @@ func (h *HandlesHandler) ListHandles(w http.ResponseWriter, r *http.Request) {
 		var hDTO handleDTO
 		var label sql.NullString
 		var pausedInt int
-		if err := rows.Scan(&hDTO.Handle, &label, &hDTO.Kind, &pausedInt, &hDTO.CreatedDay); err != nil {
+		var policyStr sql.NullString
+		if err := rows.Scan(&hDTO.Handle, &label, &hDTO.Kind, &pausedInt, &hDTO.CreatedDay, &policyStr); err != nil {
 			WriteUniformError(w, http.StatusInternalServerError, "internal_error")
 			return
 		}
@@ -102,6 +114,12 @@ func (h *HandlesHandler) ListHandles(w http.ResponseWriter, r *http.Request) {
 			hDTO.Label = label.String
 		}
 		hDTO.Paused = (pausedInt != 0)
+		if policyStr.Valid && strings.TrimSpace(policyStr.String) != "" {
+			var p map[string]any
+			if err := json.Unmarshal([]byte(policyStr.String), &p); err == nil {
+				hDTO.Policy = p
+			}
+		}
 		handles = append(handles, hDTO)
 	}
 
@@ -122,8 +140,9 @@ func (h *HandlesHandler) CreateHandle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Label string `json:"label"`
-		Kind  string `json:"kind"`
+		Label  string         `json:"label"`
+		Kind   string         `json:"kind"`
+		Policy map[string]any `json:"policy"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -146,11 +165,40 @@ func (h *HandlesHandler) CreateHandle(w http.ResponseWriter, r *http.Request) {
 
 	today := core.Today()
 
+	var streamerPolicy map[string]any
+	if kind == core.HandleKindStream {
+		tok, tokErr := generateOverlayToken()
+		if tokErr != nil {
+			WriteUniformError(w, http.StatusInternalServerError, "internal_error")
+			return
+		}
+		streamerPolicy = map[string]any{
+			"digest_window_s": 60,
+			"max_per_hour":    60,
+			"min_count":       1,
+			"overlay_token":   tok,
+			"overlay_style":   "pop-in",
+		}
+		for k, v := range req.Policy {
+			streamerPolicy[k] = v
+		}
+	} else if req.Policy != nil {
+		streamerPolicy = req.Policy
+	}
+
+	var policyJSON sql.NullString
+	if streamerPolicy != nil {
+		b, err := json.Marshal(streamerPolicy)
+		if err == nil {
+			policyJSON = sql.NullString{String: string(b), Valid: true}
+		}
+	}
+
 	if h.store != nil {
 		err = h.store.Write(r.Context(), func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(r.Context(),
-				"INSERT INTO handles (handle, account_id, label, kind, paused, created_day) VALUES (?, ?, ?, ?, 0, ?)",
-				handle.Raw(), accountID.Int64(), req.Label, string(kind), today.Int())
+				"INSERT INTO handles (handle, account_id, label, kind, paused, policy_json, created_day) VALUES (?, ?, ?, ?, 0, ?, ?)",
+				handle.Raw(), accountID.Int64(), req.Label, string(kind), policyJSON, today.Int())
 			return err
 		})
 		if err != nil {
@@ -159,15 +207,20 @@ func (h *HandlesHandler) CreateHandle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(http.StatusCreated)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	resp := map[string]any{
 		"handle":      handle.Raw(),
 		"label":       req.Label,
 		"kind":        string(kind),
 		"paused":      false,
 		"created_day": today.Int(),
-	})
+	}
+	if streamerPolicy != nil {
+		resp["policy"] = streamerPolicy
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // UpdateHandle modifies the label or paused state of an owned handle.
@@ -189,16 +242,73 @@ func (h *HandlesHandler) UpdateHandle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Paused *bool   `json:"paused"`
-		Label  *string `json:"label"`
+		Paused *bool          `json:"paused"`
+		Label  *string        `json:"label"`
+		Policy map[string]any `json:"policy"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		WriteUniformError(w, http.StatusBadRequest, "invalid_body")
 		return
 	}
 
+	var mergedPolicy map[string]any
 	if h.store != nil {
 		err := h.store.Write(r.Context(), func(tx *sql.Tx) error {
+			var existingPolicyStr sql.NullString
+			err := tx.QueryRowContext(r.Context(),
+				"SELECT policy_json FROM handles WHERE handle = ? AND account_id = ?",
+				handleStr, accountID.Int64()).Scan(&existingPolicyStr)
+			if err != nil {
+				return err
+			}
+
+			merged := make(map[string]any)
+			if existingPolicyStr.Valid && strings.TrimSpace(existingPolicyStr.String) != "" {
+				_ = json.Unmarshal([]byte(existingPolicyStr.String), &merged)
+			}
+
+			policyUpdated := false
+			if req.Policy != nil {
+				policyUpdated = true
+				for k, v := range req.Policy {
+					merged[k] = v
+				}
+
+				rotateVal, _ := req.Policy["rotate_overlay_token"].(bool)
+				if rotateVal {
+					tok, err := generateOverlayToken()
+					if err != nil {
+						return err
+					}
+					merged["overlay_token"] = tok
+				}
+				delete(merged, "rotate_overlay_token")
+
+				revokeVal, _ := req.Policy["revoke_overlay_token"].(bool)
+				if revokeVal {
+					delete(merged, "overlay_token")
+				}
+				delete(merged, "revoke_overlay_token")
+			}
+			mergedPolicy = merged
+
+			if policyUpdated {
+				var policyJSON sql.NullString
+				if len(merged) > 0 {
+					b, err := json.Marshal(merged)
+					if err != nil {
+						return err
+					}
+					policyJSON = sql.NullString{String: string(b), Valid: true}
+				}
+				_, err = tx.ExecContext(r.Context(),
+					"UPDATE handles SET policy_json = ? WHERE handle = ? AND account_id = ?",
+					policyJSON, handleStr, accountID.Int64())
+				if err != nil {
+					return err
+				}
+			}
+
 			if req.Paused != nil {
 				pausedInt := 0
 				if *req.Paused {
@@ -243,7 +353,12 @@ func (h *HandlesHandler) UpdateHandle(w http.ResponseWriter, r *http.Request) {
 		h.resolver.Invalidate(handleStr)
 	}
 
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"handle": handleStr,
+		"policy": mergedPolicy,
+	})
 }
 
 // DeleteHandle burns a handle permanently.
