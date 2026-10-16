@@ -20,6 +20,12 @@ func main() {
 	configPath := flag.String("config", "", "path to TOML configuration file")
 	flag.Parse()
 
+	if *configPath == "" {
+		if envCfg := os.Getenv("HALP_CONFIG_FILE"); envCfg != "" {
+			*configPath = envCfg
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -27,6 +33,13 @@ func main() {
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("failed to load configuration: %v", err)
+	}
+
+	if envDB := os.Getenv("HALP_DB_PATH"); envDB != "" {
+		cfg.Startup.DBPath = envDB
+	}
+	if envAddr := os.Getenv("HALP_HTTP_ADDR"); envAddr != "" {
+		cfg.Startup.HTTPAddr = envAddr
 	}
 
 	// Start background SIGHUP listener for reloadable config
@@ -52,6 +65,10 @@ func main() {
 	}
 	defer assembly.Close()
 	assembly.Start(ctx)
+
+	if assembly.VAPIDPublicKey != "" {
+		log.Printf("VAPID public key: %s", assembly.VAPIDPublicKey)
+	}
 
 	// 4. Construct router (router.go is frozen after Wave 0)
 	router := internalhttp.NewRouter(routerDeps)

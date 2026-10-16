@@ -1,0 +1,48 @@
+# Halp Production Caddy Reverse Proxy Configuration
+# ==============================================================================
+# In accordance with AGENTS.md Invariants 6, 8, and 9:
+# - Strips client IP addresses, User-Agent, and identifying query params from logs.
+# - Blocks external access to /metrics (Prometheus scraping via internal network).
+# - Disables proxy response buffering (flush_interval -1) for real-time SSE streams.
+# ==============================================================================
+
+{$HALP_DOMAIN:localhost} {
+	# Hardened security response headers
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# AGENTS.md Invariant 9: No identifiers in logs or metrics.
+	# Access logs delete client IP addresses, User-Agent strings, and URI query params.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>remote_ip delete
+				request>client_ip delete
+				request>headers>User-Agent delete
+				request>headers>X-Forwarded-For delete
+				request>headers>Forwarded delete
+				request>uri query delete
+			}
+		}
+	}
+
+	# Invariant 9: Protect Prometheus metrics from public inspection.
+	# Internal Prometheus scrapers query halpd:8080/metrics directly on the private network.
+	@metrics {
+		path /metrics
+	}
+	respond @metrics 403
+
+	# Reverse proxy to halpd backend.
+	# flush_interval -1 disables proxy buffering so Server-Sent Events (/v1/stream, /overlay/*)
+	# are flushed to subscribers with sub-millisecond arrival latency.
+	reverse_proxy halpd:8080 {
+		flush_interval -1
+	}
+}

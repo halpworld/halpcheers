@@ -52,10 +52,34 @@ func RequestSizeLimitMiddleware(maxBytes int64) func(http.Handler) http.Handler 
 	}
 }
 
+type sseFlusherResponseWriter struct {
+	http.ResponseWriter
+	flusher http.Flusher
+}
+
+func (s *sseFlusherResponseWriter) Flush() {
+	if s.flusher != nil {
+		s.flusher.Flush()
+	}
+}
+
 // TimeoutMiddleware sets a request processing deadline on the context.
 func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/stream" || strings.HasPrefix(r.URL.Path, "/overlay/") ||
+				strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+				if _, ok := w.(http.Flusher); !ok {
+					if flusher := findFlusher(w); flusher != nil {
+						w = &sseFlusherResponseWriter{
+							ResponseWriter: w,
+							flusher:        flusher,
+						}
+					}
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
 			next.ServeHTTP(w, r.WithContext(ctx))

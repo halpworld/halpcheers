@@ -2,11 +2,16 @@ package push_test
 
 import (
 	"context"
+	"crypto/ecdh"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +19,7 @@ import (
 	"github.com/halpworld/halpcheers/server/internal/core"
 	"github.com/halpworld/halpcheers/server/internal/obs"
 	"github.com/halpworld/halpcheers/server/internal/push"
+	"github.com/halpworld/halpcheers/server/internal/push/webpush"
 	"github.com/halpworld/halpcheers/server/internal/store"
 )
 
@@ -264,5 +270,319 @@ func TestGracefulShutdownDrainsWithinTimeout(t *testing.T) {
 	err := pool.Stop()
 	if err != nil {
 		t.Fatalf("expected graceful shutdown, got error: %v", err)
+	}
+}
+
+// TestDefaultSender_Payloadless verifies that DigestCount == 1 sends an empty body,
+// no Content-Encoding header, and a valid Authorization header signed with VAPID.
+func TestDefaultSender_Payloadless(t *testing.T) {
+	var (
+		mu           sync.Mutex
+		receivedReqs int
+		authHeader   string
+		contentEnc   string
+		receivedBody []byte
+	)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		receivedReqs++
+		authHeader = r.Header.Get("Authorization")
+		contentEnc = r.Header.Get("Content-Encoding")
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = body
+		mu.Unlock()
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	st := setupTestStore(t)
+	ctx := context.Background()
+
+	targetURL := ts.URL + "/sub/payloadless"
+	acc, err := st.CreateAccount(ctx, []byte("hash_pl"), "eu-1")
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	today := core.Today().Int()
+	err = st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO subscriptions (account_id, kind, endpoint, created_day) VALUES (?, 'webpush', ?, ?)",
+			acc.Int64(), targetURL, today)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("insert subscription: %v", err)
+	}
+
+	sender := push.NewDefaultSender()
+	pool := push.NewPool(push.PoolConfig{
+		Workers: 1,
+		Store:   st,
+		Sender:  sender,
+	})
+
+	job := push.DispatchJob{
+		Recipient:   acc,
+		DigestCount: 1,
+		EnqueuedAt:  time.Now(),
+	}
+
+	pool.QueueJob(job)
+	_ = pool.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if receivedReqs != 1 {
+		t.Fatalf("expected 1 dispatch request, got %d", receivedReqs)
+	}
+	if len(receivedBody) != 0 {
+		t.Fatalf("expected empty body for payloadless dispatch, got %d bytes", len(receivedBody))
+	}
+	if contentEnc != "" {
+		t.Fatalf("expected no Content-Encoding header for payloadless dispatch, got %q", contentEnc)
+	}
+	if !strings.HasPrefix(authHeader, "vapid ") {
+		t.Fatalf("expected Authorization header starting with 'vapid ', got %q", authHeader)
+	}
+	sub, _, err := webpush.VerifyVAPID(authHeader, ts.URL)
+	if err != nil {
+		t.Fatalf("VerifyVAPID failed: %v", err)
+	}
+	if sub != "mailto:ops@halp.to" {
+		t.Fatalf("expected sub 'mailto:ops@halp.to', got %q", sub)
+	}
+}
+
+// TestDefaultSender_EncryptedDigest verifies that DigestCount == 5 produces an RFC 8291/8188
+// encrypted message with Content-Encoding aes128gcm which decrypts to {"n":5}.
+func TestDefaultSender_EncryptedDigest(t *testing.T) {
+	uaPrivKey, err := ecdh.P256().GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate ua key: %v", err)
+	}
+	uaPubKey := uaPrivKey.PublicKey().Bytes()
+	authSecret := make([]byte, 16)
+	if _, err := rand.Read(authSecret); err != nil {
+		t.Fatalf("rand auth: %v", err)
+	}
+
+	var (
+		mu           sync.Mutex
+		capturedBody []byte
+		capturedEnc  string
+		capturedAuth string
+	)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		capturedBody = body
+		capturedEnc = r.Header.Get("Content-Encoding")
+		capturedAuth = r.Header.Get("Authorization")
+		mu.Unlock()
+
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer ts.Close()
+
+	st := setupTestStore(t)
+	ctx := context.Background()
+
+	targetURL := ts.URL + "/sub/encrypted"
+	acc, err := st.CreateAccount(ctx, []byte("hash_enc"), "eu-1")
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	today := core.Today().Int()
+	err = st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO subscriptions (account_id, kind, endpoint, p256dh, auth, created_day) VALUES (?, 'webpush', ?, ?, ?, ?)",
+			acc.Int64(), targetURL, uaPubKey, authSecret, today)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("insert subscription: %v", err)
+	}
+
+	sender := push.NewDefaultSender()
+	pool := push.NewPool(push.PoolConfig{
+		Workers: 1,
+		Store:   st,
+		Sender:  sender,
+	})
+
+	job := push.DispatchJob{
+		Recipient:   acc,
+		DigestCount: 5,
+		EnqueuedAt:  time.Now(),
+	}
+
+	pool.QueueJob(job)
+	_ = pool.Stop()
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	if capturedEnc != "aes128gcm" {
+		t.Fatalf("expected Content-Encoding 'aes128gcm', got %q", capturedEnc)
+	}
+	if len(capturedBody) == 0 {
+		t.Fatalf("expected non-empty encrypted body")
+	}
+	if !strings.HasPrefix(capturedAuth, "vapid ") {
+		t.Fatalf("expected Authorization header with 'vapid ', got %q", capturedAuth)
+	}
+
+	decrypted, err := webpush.Decrypt(uaPrivKey, authSecret, capturedBody)
+	if err != nil {
+		t.Fatalf("Decrypt failed: %v", err)
+	}
+
+	expectedPlaintext := `{"n":5}`
+	if string(decrypted) != expectedPlaintext {
+		t.Fatalf("expected decrypted payload %q, got %q", expectedPlaintext, string(decrypted))
+	}
+}
+
+// TestDefaultSender_Retry verifies that DefaultSender performs a single retry
+// on 503 or 429 status codes, honoring Retry-After, and does not retry on non-retryable codes.
+func TestDefaultSender_Retry(t *testing.T) {
+	t.Run("503 retry succeeds", func(t *testing.T) {
+		var attempts int
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			if attempts == 1 {
+				w.Header().Set("Retry-After", "0")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer ts.Close()
+
+		sender := push.NewDefaultSender()
+		testSub := push.Subscription{
+			Endpoint: ts.URL + "/retry-503",
+		}
+
+		status, err := sender.Send(context.Background(), testSub, nil)
+		if err != nil {
+			t.Fatalf("Send failed: %v", err)
+		}
+		if status != http.StatusOK {
+			t.Fatalf("expected status 200 after retry, got %d", status)
+		}
+		if attempts != 2 {
+			t.Fatalf("expected 2 attempts, got %d", attempts)
+		}
+	})
+
+	t.Run("429 retry succeeds", func(t *testing.T) {
+		var attempts int
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			if attempts == 1 {
+				w.Header().Set("Retry-After", "0")
+				w.WriteHeader(http.StatusTooManyRequests)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer ts.Close()
+
+		sender := push.NewDefaultSender()
+		testSub := push.Subscription{
+			Endpoint: ts.URL + "/retry-429",
+		}
+
+		status, err := sender.Send(context.Background(), testSub, nil)
+		if err != nil {
+			t.Fatalf("Send failed: %v", err)
+		}
+		if status != http.StatusOK {
+			t.Fatalf("expected status 200 after retry, got %d", status)
+		}
+		if attempts != 2 {
+			t.Fatalf("expected 2 attempts, got %d", attempts)
+		}
+	})
+
+	t.Run("404 does not retry", func(t *testing.T) {
+		var attempts int
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			attempts++
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer ts.Close()
+
+		sender := push.NewDefaultSender()
+		testSub := push.Subscription{
+			Endpoint: ts.URL + "/retry-404",
+		}
+
+		status, err := sender.Send(context.Background(), testSub, nil)
+		if err != nil {
+			t.Fatalf("Send failed: %v", err)
+		}
+		if status != http.StatusNotFound {
+			t.Fatalf("expected status 404, got %d", status)
+		}
+		if attempts != 1 {
+			t.Fatalf("expected exactly 1 attempt for 404, got %d", attempts)
+		}
+	})
+}
+
+// TestCacheInvalidationOnGone verifies that on 410 Gone, any cached keypair for that endpoint is invalidated.
+func TestCacheInvalidationOnGone(t *testing.T) {
+	cache := webpush.NewKeypairCache()
+	targetURL := "https://push.example.com/test-gone-cache"
+	cache.Put(targetURL, &webpush.CachedSubscriptionSecret{})
+
+	if _, ok := cache.Get(targetURL); !ok {
+		t.Fatalf("expected item to be in cache before test")
+	}
+
+	st := setupTestStore(t)
+	ctx := context.Background()
+
+	acc, err := st.CreateAccount(ctx, []byte("hash_gone"), "eu-1")
+	if err != nil {
+		t.Fatalf("create account: %v", err)
+	}
+
+	today := core.Today().Int()
+	_ = st.Write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO subscriptions (account_id, kind, endpoint, created_day) VALUES (?, 'webpush', ?, ?)",
+			acc.Int64(), targetURL, today)
+		return err
+	})
+
+	mockSender := NewMockSender()
+	mockSender.SetResponse(targetURL, http.StatusGone, nil)
+
+	pool := push.NewPool(push.PoolConfig{
+		Workers: 1,
+		Store:   st,
+		Sender:  mockSender,
+		Cache:   cache,
+	})
+
+	pool.QueueJob(push.DispatchJob{
+		Recipient:   acc,
+		DigestCount: 1,
+		EnqueuedAt:  time.Now(),
+	})
+	_ = pool.Stop()
+
+	if _, ok := cache.Get(targetURL); ok {
+		t.Fatalf("expected cache entry to be invalidated on 410 Gone")
 	}
 }

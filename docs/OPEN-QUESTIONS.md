@@ -660,6 +660,15 @@ Decided: the public transparency posture is formalized in `docs/TRANSPARENCY.md`
 2. **Warrant canary**: Publishes a bi-annually updated warrant canary certifying zero National Security Letters, FISA court orders, gag orders, or demands for backdoors/encryption keys.
 3. **Aggregate non-identifying metrics**: System health and transparency are verified via Prometheus counters (`halp_pings_ingress_total`, `halp_pings_dispatched_total`, `halp_db_accounts_total`) with zero personal identifiers.
 
+### 54. Production Readiness & Edge Hardening → **persistent VAPID P-256 scalar, bounded 100k ECDH cache, SSE timeout exemption + Flusher unwrapping, loopback-only backend port, zero-identifier Caddyfile**
+
+Decided: to make the single-region (`eu-1`) deployment turn-key on a production VPS while preserving all 9 invariants:
+1. **Web Push VAPID & RFC 8291/8188 production wiring (`server/internal/push/`)**: `DefaultSender` signs every Web Push request with ES256 VAPID (`Authorization: vapid t=..., k=...`), sends payloadless bodies for `DigestCount == 1`, and encrypts `{"n":count}` (`aes128gcm`) for `DigestCount > 1`. `KeypairCache` is bounded to `100,000` entries (Invariant 8) and evicted alongside SQLite rows (`created_day <= sendStartDay`) on `404`/`410` (Invariant 4). Transient `429`/`5xx` responses honour `Retry-After` (capped at `2s`) for a single retry before dropping.
+2. **VAPID key persistence**: `LoadOrGenerateVAPIDKey` loads the 32-byte P-256 private scalar from `HALP_VAPID_PRIVATE_KEY` or `HALP_VAPID_KEY_FILE` (`/data/vapid.key`, auto-created with `0700` parent directory and `0600` file permissions on first boot) and logs the server's base64url uncompressed public key at startup.
+3. **SSE `TimeoutMiddleware` exemption & `http.Flusher` unwrapping (`server/internal/http/middleware.go`)**: Long-lived SSE streams (`/v1/stream`, `/overlay/*`, `Accept: text/event-stream`) are exempted from the 10s request deadline and wrapped with `sseFlusherResponseWriter` so `w.(http.Flusher)` succeeds through `AccessLogMiddleware`.
+4. **Graceful drain & 6-hour maintenance sweep (`server/internal/http/assemble.go`)**: On `SIGTERM`, `Assembly.Close()` drains remaining jobs from `Queue` into `Coalescer` and flushes all pending digests (`Coalescer.FlushAll()`) into `PushPool` before draining workers. A 6-hour background ticker sweeps expired `blocks` (`blocks.ttl_days`, 365d) and ancient `subscriptions` (`subscriptions.prune_after_days`, 180d).
+5. **Loopback-only backend & zero-identifier Caddy edge (`docker-compose.yml`, `Caddyfile`, `docs/OPERATIONS.md`)**: `halpd` binds `127.0.0.1:8080:8080` so external traffic cannot bypass Caddy's TLS termination, `flush_interval -1` SSE streaming, `/metrics` `403` gate, and log filter scrubbing client IPs, `User-Agent`, `X-Forwarded-For`, and query strings (Invariant 9).
+
 | Decision | Topic | Summary |
 | --- | --- | --- |
 | 47 | Phase 2 Contacts Sync | `GET/PUT/DELETE /v1/contacts` with `If-Match` optimistic concurrency, 4 KiB boundary padding before AES-256-GCM encryption under `HKDF-SHA256(account_key, "halp/contacts/v1")`, 64 KiB ceiling, and CRDT set-union merge where `deleted: true` wins. |
@@ -669,6 +678,4 @@ Decided: the public transparency posture is formalized in `docs/TRANSPARENCY.md`
 | 51 | Phase 3 OBS Overlay & Streamer Presets | `GET /overlay/{token}`, revocable read-only SSE overlay tokens decoupled from handles, 60s digest window preset, and `.stream-overlay-controls` in web UI. |
 | 52 | Phase 3 Twitch/YouTube Chat Bot | `tui/cmd/halp-bot`, thin client over public API, `!halp`/`!appreciate`/`!cheers` commands, 15s channel cooldown, 60s user cooldown with bounded map (`MaxTrackedUsers = 10,000`) per Invariant 8, and Invariant 9 compliance. |
 | 53 | Phase 3 Public Transparency Report | `docs/TRANSPARENCY.md`, warrant canary, architectural impossibility proofs under Invariants 1 & 6, and aggregate non-identifying Prometheus metrics. |
-
-
-
+| 54 | Production Readiness & Edge Hardening | Persistent VAPID key (`0600`), bounded 100k `KeypairCache`, single `429`/`5xx` retry, SSE timeout exemption + `http.Flusher` unwrapping, graceful coalescer drain, 6h TTL maintenance ticker, loopback-only `127.0.0.1:8080`, and zero-identifier `Caddyfile` + `docs/OPERATIONS.md`. |

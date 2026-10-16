@@ -1,0 +1,102 @@
+# Halp Production Configuration Template
+# ==============================================================================
+# In accordance with docs/ARCHITECTURE.md § Configuration and AGENTS.md:
+# - Fixed allocation sizing keys are STARTUP-ONLY (Invariant 8).
+# - Rate-limit thresholds, windows, and operational limits are SIGHUP-RELOADABLE.
+# ==============================================================================
+
+[http]
+# Bind address for HTTP listener (STARTUP-ONLY)
+addr = ":8080"
+
+[db]
+# Path to SQLite WAL database file (STARTUP-ONLY)
+# Single EU region eu-1 data residency rule (AGENTS.md Data Rules)
+path = "/data/halp.db"
+
+[queue]
+# Capacity of the bounded in-memory ingress ping ring buffer (STARTUP-ONLY, Invariant 8)
+# When the queue is full under sustained burst, requests drop with 202 (Invariant 7)
+size = 65536
+
+[dispatch]
+# Number of concurrent delivery workers draining the queue (STARTUP-ONLY)
+# Recommended: 4 to 8 per vCPU core
+workers = 8
+
+# Expiration cutoff for stale un-dispatched ping jobs (RELOADABLE on SIGHUP)
+max_age = "30s"
+
+[shutdown]
+# Timeout deadline for draining the in-memory queue on SIGTERM/SIGINT (STARTUP-ONLY)
+drain_timeout = "10s"
+
+[idle]
+# Inactivity duration before SSE connection demotes to long-poll pending count (RELOADABLE on SIGHUP)
+demote_after = "15m"
+
+[guard]
+# Expected peak daily pings sizing the pair-filter cascade and sketch (STARTUP-ONLY, Invariant 8)
+# Automatically enforces a 1 MiB floor per cascade slot per 24h window (docs/ABUSE.md § Sizing rule)
+expected_daily_pings = 10000
+
+[guard.pair]
+# Rotation interval for pair-filter cascade double-buffer windows (STARTUP-ONLY)
+window = "24h"
+
+# Maximum daily pings per sender-recipient pair for personal/social/group handles (STARTUP-ONLY)
+max = 3
+
+# Maximum daily pings per sender-recipient pair for live-stream handles (STARTUP-ONLY)
+max_stream = 10
+
+[guard.sender]
+# Maximum pings an authenticated account may send per hour (RELOADABLE on SIGHUP)
+hour = 20
+
+# Maximum pings an authenticated account may send per day (RELOADABLE on SIGHUP)
+day = 100
+
+[pow]
+# Target client CPU work time in ms under normal load (RELOADABLE on SIGHUP)
+floor_ms = 10
+
+# Target client CPU work time in ms for account creation (RELOADABLE on SIGHUP)
+signup_ms = 1500
+
+# Challenge rotation epoch duration (RELOADABLE on SIGHUP)
+epoch = "5m"
+
+[digest]
+# Default coalescing window in seconds for new accounts and handles (RELOADABLE on SIGHUP)
+window_s = 60
+
+# Maximum digest push/stream notifications emitted per hour (RELOADABLE on SIGHUP)
+max_per_hour = 12
+
+[groups]
+# Minimum active members required before group handles resolve (RELOADABLE on SIGHUP, Invariant 6)
+min_size = 5
+
+# Hard ceiling on member count per group (RELOADABLE on SIGHUP, Invariant 8)
+max_members = 500
+
+# Maximum groups an account can participate in (RELOADABLE on SIGHUP, Invariant 8)
+max_per_account = 20
+
+[alias]
+# Inactivity period after which abandoned aliases are released (RELOADABLE on SIGHUP)
+release_months = 12
+
+[contacts]
+# Maximum byte size for client-side encrypted contacts blob (RELOADABLE on SIGHUP, Invariant 8)
+# Padded to 4 KiB boundaries client-side; capped at 64 KiB
+max_bytes = 65536
+
+[blocks]
+# Lifespan for durable (sender, handle, created_day) abuse mute records (RELOADABLE on SIGHUP)
+ttl_days = 365
+
+[subscriptions]
+# Idle duration before pruning inactive Web Push subscriptions (RELOADABLE on SIGHUP)
+prune_after_days = 180

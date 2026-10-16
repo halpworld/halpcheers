@@ -4,10 +4,40 @@ services:
       context: .
       dockerfile: server/Dockerfile
     ports:
-      - "8080:8080"
+      # Invariant 9: Bound strictly to loopback so public traffic cannot bypass Caddy proxy & Invariant 9 scrubbing
+      - "127.0.0.1:8080:8080"
+    environment:
+      - HALP_DB_PATH=/data/halp.db
+      - HALP_CONFIG_FILE=/etc/halp/halp.toml
+      - HALP_VAPID_KEY_FILE=/data/vapid.key
+      - HALP_VAPID_SUBSCRIBER=${HALP_VAPID_SUBSCRIBER:-mailto:ops@halp.to}
+    command: ["-config", "/etc/halp/halp.toml"]
     volumes:
       - halpd-data:/data
+      # Mount configuration template for SIGHUP reload (operators can override with ./halp.toml:/etc/halp/halp.toml:ro)
+      - ./halp.toml.example:/etc/halp/halp.toml:ro
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - HALP_DOMAIN=${HALP_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - halpd
     restart: unless-stopped
 
 volumes:
   halpd-data:
+  caddy-data:
+  caddy-config:

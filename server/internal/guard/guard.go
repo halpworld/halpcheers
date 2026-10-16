@@ -397,11 +397,12 @@ type Service struct {
 	blockStore    BlockStore
 	metrics       *obs.Metrics
 	globalEWMA    *EWMA
-	targetEWMAs   *boundedMap[string, *EWMA]
-	senderBuckets *boundedMap[core.AccountID, *TokenBucket]
-	targetBuckets *boundedMap[string, *TokenBucket]
-	suspended     *boundedMap[core.AccountID, bool]
-	topSenders    *boundedMap[string, topSenderRecord]
+	targetEWMAs      *boundedMap[string, *EWMA]
+	senderBuckets    *boundedMap[core.AccountID, *TokenBucket]
+	senderDayBuckets *boundedMap[core.AccountID, *TokenBucket]
+	targetBuckets    *boundedMap[string, *TokenBucket]
+	suspended        *boundedMap[core.AccountID, bool]
+	topSenders       *boundedMap[string, topSenderRecord]
 
 	pairMaxPersonal int
 	pairMaxSocial   int
@@ -464,22 +465,23 @@ func NewService(cfg Config) *Service {
 	}
 
 	return &Service{
-		cascade:         NewPairCascade(pStream, slotBytes),
-		sketch:          NewCountMinSketch(cfg.SketchWidth, cfg.SketchDepth),
-		blockStore:      cfg.BlockStore,
-		metrics:         cfg.Metrics,
-		globalEWMA:      NewEWMA(60 * time.Second),
-		targetEWMAs:     newBoundedMap[string, *EWMA](capSize),
-		senderBuckets:   newBoundedMap[core.AccountID, *TokenBucket](capSize),
-		targetBuckets:   newBoundedMap[string, *TokenBucket](capSize),
-		suspended:       newBoundedMap[core.AccountID, bool](capSize),
-		topSenders:      newBoundedMap[string, topSenderRecord](capSize),
-		pairMaxPersonal: pPersonal,
-		pairMaxSocial:   pSocial,
-		pairMaxGroup:    pGroup,
-		pairMaxStream:   pStream,
-		senderHour:      sHour,
-		senderDay:       sDay,
+		cascade:          NewPairCascade(pStream, slotBytes),
+		sketch:           NewCountMinSketch(cfg.SketchWidth, cfg.SketchDepth),
+		blockStore:       cfg.BlockStore,
+		metrics:          cfg.Metrics,
+		globalEWMA:       NewEWMA(60 * time.Second),
+		targetEWMAs:      newBoundedMap[string, *EWMA](capSize),
+		senderBuckets:    newBoundedMap[core.AccountID, *TokenBucket](capSize),
+		senderDayBuckets: newBoundedMap[core.AccountID, *TokenBucket](capSize),
+		targetBuckets:    newBoundedMap[string, *TokenBucket](capSize),
+		suspended:        newBoundedMap[core.AccountID, bool](capSize),
+		topSenders:       newBoundedMap[string, topSenderRecord](capSize),
+		pairMaxPersonal:  pPersonal,
+		pairMaxSocial:    pSocial,
+		pairMaxGroup:     pGroup,
+		pairMaxStream:    pStream,
+		senderHour:       sHour,
+		senderDay:        sDay,
 	}
 }
 
@@ -530,11 +532,21 @@ func (s *Service) Allow(ctx context.Context, sender core.AccountID, target core.
 		}
 	}
 
-	// 3. Sender rate limit bucket (Layer 1: 20/hour default)
+	// 3. Sender rate limit bucket (Layer 1: hourly and daily)
 	sb := s.senderBuckets.LoadOrStore(sender, func() *TokenBucket {
 		return NewTokenBucket(s.senderHour, 1*time.Hour)
 	})
 	if !sb.Allow() {
+		if s.metrics != nil {
+			s.metrics.IncPingsDropped(obs.DropReasonRateLimited)
+		}
+		return false
+	}
+
+	sbd := s.senderDayBuckets.LoadOrStore(sender, func() *TokenBucket {
+		return NewTokenBucket(s.senderDay, 24*time.Hour)
+	})
+	if !sbd.Allow() {
 		if s.metrics != nil {
 			s.metrics.IncPingsDropped(obs.DropReasonRateLimited)
 		}

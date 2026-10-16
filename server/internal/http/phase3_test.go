@@ -567,3 +567,162 @@ func TestTransparencyReport(t *testing.T) {
 		t.Errorf("expected GeneratedDay %v, got %v", core.Today(), report.GeneratedDay)
 	}
 }
+
+// TestSSEStreamNotAbortedByShortReqTimeout verifies that /v1/stream and /overlay/{token}?stream=1
+// are exempt from ReqTimeout in TimeoutMiddleware.
+func TestSSEStreamNotAbortedByShortReqTimeout(t *testing.T) {
+	st, cleanup := setupTestStore(t)
+	defer cleanup()
+
+	tokVal := "abcdef0123456789abcdef0123456789"
+
+	// Seed account 6001 and 6002
+	err := st.Write(context.Background(), func(tx *sql.Tx) error {
+		_, err := tx.Exec("INSERT INTO accounts (id, key_hash, created_day, last_seen_day) VALUES (6001, 'hash6001', 20000, 20000)")
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec("INSERT INTO accounts (id, key_hash, created_day, last_seen_day) VALUES (6002, 'hash6002', 20000, 20000)")
+		if err != nil {
+			return err
+		}
+		policy := `{"digest_window_s":60,"max_per_hour":60,"min_count":1,"overlay_token":"` + tokVal + `","overlay_style":"pop-in"}`
+		_, err = tx.Exec("INSERT INTO handles (handle, account_id, kind, paused, policy_json, created_day) VALUES ('e6002s001', 6002, 'stream', 0, ?, 20000)", policy)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to seed accounts: %v", err)
+	}
+
+	auth := &mockSettingsAuth{
+		sessions: map[string]core.AccountID{
+			"tok-6001": 6001,
+		},
+	}
+
+	streamHub := stream.NewHub(stream.Config{})
+	defer streamHub.Close()
+
+	streamH := internalhttp.NewStreamHandlerWithDeps(streamHub, auth, nil)
+	publicH := internalhttp.NewConfiguredPublicHandlerWithDeps(st, streamHub)
+
+	// Configure router with very short ReqTimeout (30ms)
+	r := internalhttp.NewRouter(internalhttp.RouterDeps{
+		Stream:     streamH,
+		Public:     publicH,
+		ReqTimeout: 30 * time.Millisecond,
+	})
+
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	// Subtest 1: /v1/stream survives past the 30ms ReqTimeout
+	t.Run("/v1/stream survives short ReqTimeout", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/v1/stream", nil)
+		if err != nil {
+			t.Fatalf("create request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer tok-6001")
+		req.Header.Set("Accept", "text/event-stream")
+
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("stream connection error: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+		}
+
+		reader := bufio.NewReader(resp.Body)
+
+		// Wait 70ms (more than double the 30ms timeout)
+		time.Sleep(70 * time.Millisecond)
+
+		// Broadcast a ping to account 6001
+		if !streamHub.Broadcast(6001, 1) {
+			t.Fatal("expected broadcast to be accepted by hub")
+		}
+
+		// Read events from stream; should succeed if connection was not timed out
+		foundPing := false
+		foundData := false
+		for i := 0; i < 10; i++ {
+			line, readErr := reader.ReadString('\n')
+			if readErr != nil {
+				t.Fatalf("connection was aborted by timeout middleware: %v", readErr)
+			}
+			lineTrimmed := strings.TrimSpace(line)
+			if lineTrimmed == "event: ping" {
+				foundPing = true
+			}
+			if lineTrimmed == `data: {"n":1}` {
+				foundData = true
+				break
+			}
+		}
+
+		if !foundPing || !foundData {
+			t.Fatalf("did not receive expected ping event: ping=%v data=%v", foundPing, foundData)
+		}
+	})
+
+	// Subtest 2: /overlay/{token}?stream=1 survives past the 30ms ReqTimeout
+	t.Run("/overlay/{token}?stream=1 survives short ReqTimeout", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+
+		overlayURL := ts.URL + "/overlay/" + tokVal + "?stream=1"
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, overlayURL, nil)
+		if err != nil {
+			t.Fatalf("create request: %v", err)
+		}
+		req.Header.Set("Accept", "text/event-stream")
+
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatalf("overlay connection error: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", resp.StatusCode)
+		}
+
+		reader := bufio.NewReader(resp.Body)
+
+		// Wait 70ms (more than double the 30ms timeout)
+		time.Sleep(70 * time.Millisecond)
+
+		// Broadcast a ping to account 6002
+		if !streamHub.Broadcast(6002, 1) {
+			t.Fatal("expected broadcast to be accepted by hub")
+		}
+
+		// Read events from overlay stream; should succeed if connection was not timed out
+		foundPing := false
+		foundData := false
+		for i := 0; i < 10; i++ {
+			line, readErr := reader.ReadString('\n')
+			if readErr != nil {
+				t.Fatalf("overlay stream was aborted by timeout middleware: %v", readErr)
+			}
+			lineTrimmed := strings.TrimSpace(line)
+			if lineTrimmed == "event: ping" {
+				foundPing = true
+			}
+			if lineTrimmed == `data: {"n":1}` {
+				foundData = true
+				break
+			}
+		}
+
+		if !foundPing || !foundData {
+			t.Fatalf("did not receive expected overlay ping event: ping=%v data=%v", foundPing, foundData)
+		}
+	})
+}

@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -318,3 +319,75 @@ func BenchmarkEncryptWithoutKeyCache(b *testing.B) {
 		}
 	}
 }
+
+func TestKeypairCacheCapacityEviction(t *testing.T) {
+	cache := webpush.NewKeypairCacheWithCapacity(2)
+	secret1 := &webpush.CachedSubscriptionSecret{IKM: []byte("ikm1")}
+	secret2 := &webpush.CachedSubscriptionSecret{IKM: []byte("ikm2")}
+	secret3 := &webpush.CachedSubscriptionSecret{IKM: []byte("ikm3")}
+
+	cache.Put("ep1", secret1)
+	cache.Put("ep2", secret2)
+	// Overwrite existing key shouldn't evict
+	cache.Put("ep1", secret1)
+	// Now insert 3rd key, exceeding capacity 2
+	cache.Put("ep3", secret3)
+
+	// Exactly 2 items should exist
+	count := 0
+	if _, ok := cache.Get("ep1"); ok {
+		count++
+	}
+	if _, ok := cache.Get("ep2"); ok {
+		count++
+	}
+	if _, ok := cache.Get("ep3"); ok {
+		count++
+	}
+	if count != 2 {
+		t.Fatalf("expected exactly 2 items in cache after eviction, got %d", count)
+	}
+}
+
+func TestLoadOrGenerateVAPIDKey(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "vapid.key")
+
+	// 1. Generate fresh key and save to file
+	key1, pub1, err := webpush.LoadOrGenerateVAPIDKey("", keyPath)
+	if err != nil {
+		t.Fatalf("generate key failed: %v", err)
+	}
+	if key1 == nil || pub1 == "" {
+		t.Fatal("expected non-nil key and non-empty pub key")
+	}
+
+	// 2. Load the same key from file
+	key2, pub2, err := webpush.LoadOrGenerateVAPIDKey("", keyPath)
+	if err != nil {
+		t.Fatalf("load key from file failed: %v", err)
+	}
+	if pub1 != pub2 {
+		t.Fatalf("public key mismatch: %s vs %s", pub1, pub2)
+	}
+	if key1.D.Cmp(key2.D) != 0 {
+		t.Fatal("private key scalar D mismatch")
+	}
+
+	// 3. Load from raw base64url scalar
+	dBytes := key1.D.Bytes()
+	scalar := make([]byte, 32)
+	copy(scalar[32-len(dBytes):], dBytes)
+	scalarB64 := base64.RawURLEncoding.EncodeToString(scalar)
+
+	key3, pub3, err := webpush.LoadOrGenerateVAPIDKey(scalarB64, "")
+	if err != nil {
+		t.Fatalf("load from raw scalar failed: %v", err)
+	}
+	if pub3 != pub1 {
+		t.Fatalf("reconstructed pubkey mismatch: %s vs %s", pub3, pub1)
+	}
+	if key3.D.Cmp(key1.D) != 0 {
+		t.Fatal("reconstructed private key scalar mismatch")
+	}
+}
+

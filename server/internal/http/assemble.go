@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/halpworld/halpcheers/server/internal/guard"
 	"github.com/halpworld/halpcheers/server/internal/obs"
 	"github.com/halpworld/halpcheers/server/internal/push"
+	"github.com/halpworld/halpcheers/server/internal/push/webpush"
 	"github.com/halpworld/halpcheers/server/internal/region"
 	"github.com/halpworld/halpcheers/server/internal/store"
 	"github.com/halpworld/halpcheers/server/internal/stream"
@@ -116,18 +118,20 @@ func (s *sqliteBlockStore) IsBlocked(ctx context.Context, sender core.AccountID,
 // Assembly manages the full collection of services and background pumps
 // wiring the Halp server according to the Wave 1 contracts.
 type Assembly struct {
-	Auth      *auth.Service
-	PoW       *pow.Engine
-	Resolver  *region.Resolver
-	Region    *region.Service
-	Guard     *guard.Service
-	Queue     *coalesce.Queue
-	Coalescer *coalesce.Coalescer
-	PushPool  *push.Pool
-	StreamHub *stream.Hub
-	Metrics   *obs.Metrics
-	Store     *store.Store
+	Auth           *auth.Service
+	PoW            *pow.Engine
+	Resolver       *region.Resolver
+	Region         *region.Service
+	Guard          *guard.Service
+	Queue          *coalesce.Queue
+	Coalescer      *coalesce.Coalescer
+	PushPool       *push.Pool
+	StreamHub      *stream.Hub
+	Metrics        *obs.Metrics
+	Store          *store.Store
+	VAPIDPublicKey string
 
+	cfg    *config.Config
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -140,15 +144,37 @@ func AssembleDependencies(ctx context.Context, cfg *config.Config, st *store.Sto
 	}
 
 	blockStore := newSQLiteBlockStore(st)
-	guardSvc := guard.NewService(guard.Config{
+	guardCfg := guard.Config{
 		BlockStore: blockStore,
 		Metrics:    metrics,
-	})
+	}
+	if cfg != nil {
+		guardCfg.PairMaxPersonal = cfg.Startup.GuardPairMaxPersonal
+		guardCfg.PairMaxSocial = cfg.Startup.GuardPairMaxSocial
+		guardCfg.PairMaxGroup = cfg.Startup.GuardPairMaxGroup
+		guardCfg.PairMaxStream = cfg.Startup.GuardPairMaxStream
+		guardCfg.SlotBytes = cfg.Startup.GuardPairSlotBytes
+		guardCfg.SketchWidth = cfg.Startup.GuardSketchWidth
+		guardCfg.SketchDepth = cfg.Startup.GuardSketchDepth
+		if r := cfg.Reloadable(); r != nil {
+			guardCfg.SenderHour = r.GuardSenderHour
+			guardCfg.SenderDay = r.GuardSenderDay
+		}
+	}
+	guardSvc := guard.NewService(guardCfg)
 
-	powEngine, err := pow.New(pow.Config{
+	powCfg := pow.Config{
 		Feed:    guardSvc,
 		Metrics: metrics,
-	})
+	}
+	if cfg != nil {
+		if r := cfg.Reloadable(); r != nil {
+			powCfg.FloorMs = r.PowFloorMs
+			powCfg.SignupMs = r.PowSignupMs
+			powCfg.EpochDuration = r.PowEpoch
+		}
+	}
+	powEngine, err := pow.New(powCfg)
 	if err != nil {
 		return RouterDeps{}, nil, fmt.Errorf("pow init: %w", err)
 	}
@@ -164,20 +190,65 @@ func AssembleDependencies(ctx context.Context, cfg *config.Config, st *store.Sto
 	resolver := region.NewResolver(st, 10_000)
 	regionSvc := region.NewService(st, resolver)
 
-	queue := coalesce.NewQueue(65536, metrics)
-	coalescer := coalesce.New(coalesce.Config{
+	queueCapacity := 65536
+	if cfg != nil && cfg.Startup.QueueSize > 0 {
+		queueCapacity = cfg.Startup.QueueSize
+	}
+	queue := coalesce.NewQueue(queueCapacity, metrics)
+
+	coalesceCfg := coalesce.Config{
 		Metrics:       metrics,
 		DefaultWindow: 60 * time.Second,
-	})
+	}
+	if cfg != nil {
+		if r := cfg.Reloadable(); r != nil {
+			if r.DigestWindowSeconds > 0 {
+				coalesceCfg.DefaultWindow = time.Duration(r.DigestWindowSeconds) * time.Second
+			}
+			if r.DispatchMaxAge > 0 {
+				coalesceCfg.MaxAge = r.DispatchMaxAge
+			}
+		}
+	}
+	coalescer := coalesce.New(coalesceCfg)
 
-	pushPool := push.NewPool(push.PoolConfig{
+	vapidPrivKey, vapidPubB64, err := webpush.LoadOrGenerateVAPIDKey(os.Getenv("HALP_VAPID_PRIVATE_KEY"), os.Getenv("HALP_VAPID_KEY_FILE"))
+	if err != nil {
+		return RouterDeps{}, nil, fmt.Errorf("vapid key initialization: %w", err)
+	}
+
+	subscriber := os.Getenv("HALP_VAPID_SUBSCRIBER")
+	if subscriber == "" {
+		subscriber = "mailto:ops@halp.to"
+	}
+
+	keypairCache := webpush.NewKeypairCache()
+	sender := push.NewDefaultSenderWithVAPID(vapidPrivKey, subscriber, keypairCache)
+
+	poolCfg := push.PoolConfig{
 		Store:   st,
+		Sender:  sender,
+		Cache:   keypairCache,
 		Metrics: metrics,
-	})
+	}
+	if cfg != nil {
+		poolCfg.Workers = cfg.Startup.DispatchWorkers
+		poolCfg.DrainTimeout = cfg.Startup.ShutdownDrainTimeout
+		if r := cfg.Reloadable(); r != nil {
+			poolCfg.MaxAge = r.DispatchMaxAge
+		}
+	}
+	pushPool := push.NewPool(poolCfg)
 
-	streamHub := stream.NewHub(stream.Config{
+	streamCfg := stream.Config{
 		Metrics: metrics,
-	})
+	}
+	if cfg != nil {
+		if r := cfg.Reloadable(); r != nil {
+			streamCfg.IdleDemoteAfter = r.IdleDemoteAfter
+		}
+	}
+	streamHub := stream.NewHub(streamCfg)
 
 	accountsH := NewAccountsHandlerWithDeps(authSvc, st)
 	handlesH := NewHandlesHandlerWithDeps(regionSvc, resolver, st, authAdapter)
@@ -211,23 +282,25 @@ func AssembleDependencies(ctx context.Context, cfg *config.Config, st *store.Sto
 	}
 
 	assembly := &Assembly{
-		Auth:      authSvc,
-		PoW:       powEngine,
-		Resolver:  resolver,
-		Region:    regionSvc,
-		Guard:     guardSvc,
-		Queue:     queue,
-		Coalescer: coalescer,
-		PushPool:  pushPool,
-		StreamHub: streamHub,
-		Metrics:   metrics,
-		Store:     st,
+		Auth:           authSvc,
+		PoW:            powEngine,
+		Resolver:       resolver,
+		Region:         regionSvc,
+		Guard:          guardSvc,
+		Queue:          queue,
+		Coalescer:      coalescer,
+		PushPool:       pushPool,
+		StreamHub:      streamHub,
+		Metrics:        metrics,
+		Store:          st,
+		VAPIDPublicKey: vapidPubB64,
+		cfg:            cfg,
 	}
 
 	return deps, assembly, nil
 }
 
-// Start launches the background ingress and coalescing pumps.
+// Start launches the background ingress, coalescing, and maintenance pumps.
 func (a *Assembly) Start(ctx context.Context) {
 	a.ctx, a.cancel = context.WithCancel(ctx)
 
@@ -271,6 +344,48 @@ func (a *Assembly) Start(ctx context.Context) {
 			}
 		}
 	}()
+
+	// Pump 3: Daily maintenance ticker (every 6 hours)
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+
+		runMaintenance := func() {
+			pruneDays := 180
+			blocksTTLDays := 365
+			if a.cfg != nil {
+				if r := a.cfg.Reloadable(); r != nil {
+					if r.SubscriptionsPruneAfterDays > 0 {
+						pruneDays = r.SubscriptionsPruneAfterDays
+					}
+					if r.BlocksTTLDays > 0 {
+						blocksTTLDays = r.BlocksTTLDays
+					}
+				}
+			}
+			if a.PushPool != nil {
+				_ = a.PushPool.PruneAncientSubscriptions(a.ctx, pruneDays)
+			}
+			if a.Store != nil {
+				cutoff := core.Today().Int() - int64(blocksTTLDays)
+				_ = a.Store.Write(a.ctx, func(tx *sql.Tx) error {
+					_, err := tx.ExecContext(a.ctx, "DELETE FROM blocks WHERE created_day < ?", cutoff)
+					return err
+				})
+			}
+		}
+
+		for {
+			select {
+			case <-a.ctx.Done():
+				return
+			case <-ticker.C:
+				runMaintenance()
+			}
+		}
+	}()
 }
 
 // Close cleanly halts background pumps and waits for worker drains.
@@ -279,6 +394,36 @@ func (a *Assembly) Close() {
 		a.cancel()
 	}
 	a.wg.Wait()
+
+	// Drain any remaining items from ingress queue
+	if a.Queue != nil && a.Coalescer != nil && a.StreamHub != nil {
+	drainLoop:
+		for {
+			select {
+			case job, ok := <-a.Queue.Channel():
+				if !ok {
+					break drainLoop
+				}
+				a.Coalescer.Add(job)
+				a.StreamHub.Broadcast(job.Recipient, 1)
+			default:
+				break drainLoop
+			}
+		}
+	}
+
+	// Flush all coalesced pending digests to PushPool before stopping it
+	if a.Coalescer != nil && a.PushPool != nil {
+		now := time.Now()
+		for _, d := range a.Coalescer.FlushAll() {
+			a.PushPool.QueueJob(push.DispatchJob{
+				Recipient:   d.Recipient,
+				DigestCount: d.Count,
+				EnqueuedAt:  now,
+			})
+		}
+	}
+
 	if a.PushPool != nil {
 		_ = a.PushPool.Stop()
 	}

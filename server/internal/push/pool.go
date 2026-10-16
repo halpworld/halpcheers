@@ -1,15 +1,22 @@
 package push
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"database/sql"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/halpworld/halpcheers/server/internal/core"
 	"github.com/halpworld/halpcheers/server/internal/obs"
+	"github.com/halpworld/halpcheers/server/internal/push/webpush"
 	"github.com/halpworld/halpcheers/server/internal/store"
 )
 
@@ -39,11 +46,31 @@ type Sender interface {
 
 // DefaultSender provides a production HTTP client for Web Push delivery.
 type DefaultSender struct {
-	client *http.Client
+	client        *http.Client
+	vapidKey      *ecdsa.PrivateKey
+	subscriber    string
+	cache         *webpush.KeypairCache
+	maxRetryDelay time.Duration
 }
 
-// NewDefaultSender creates a DefaultSender with timeouts and connection pooling.
+// NewDefaultSender creates a DefaultSender with timeouts, connection pooling, and default VAPID key.
 func NewDefaultSender() *DefaultSender {
+	key, _, _ := webpush.LoadOrGenerateVAPIDKey("", "")
+	cache := webpush.NewKeypairCache()
+	return NewDefaultSenderWithVAPID(key, "mailto:ops@halp.to", cache)
+}
+
+// NewDefaultSenderWithVAPID creates a DefaultSender with explicit VAPID key, subscriber, and keypair cache.
+func NewDefaultSenderWithVAPID(vapidKey *ecdsa.PrivateKey, subscriber string, cache *webpush.KeypairCache) *DefaultSender {
+	if cache == nil {
+		cache = webpush.NewKeypairCache()
+	}
+	if subscriber == "" {
+		subscriber = "mailto:ops@halp.to"
+	}
+	if vapidKey == nil {
+		vapidKey, _, _ = webpush.LoadOrGenerateVAPIDKey("", "")
+	}
 	return &DefaultSender{
 		client: &http.Client{
 			Timeout: 10 * time.Second,
@@ -53,23 +80,84 @@ func NewDefaultSender() *DefaultSender {
 				IdleConnTimeout:     90 * time.Second,
 			},
 		},
+		vapidKey:      vapidKey,
+		subscriber:    subscriber,
+		cache:         cache,
+		maxRetryDelay: 2 * time.Second,
 	}
 }
 
 func (s *DefaultSender) Send(ctx context.Context, sub Subscription, payload []byte) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sub.Endpoint, nil)
+	p256dh := sub.P256DH
+	auth := sub.Auth
+	msgPayload := payload
+	if len(payload) > 0 && (len(p256dh) == 0 || len(auth) == 0) {
+		p256dh = nil
+		auth = nil
+		msgPayload = nil
+	}
+
+	enc, err := webpush.Encrypt(p256dh, auth, msgPayload, webpush.Options{
+		TTL:        60,
+		Urgency:    "normal",
+		VAPIDKey:   s.vapidKey,
+		Subscriber: s.subscriber,
+		Endpoint:   sub.Endpoint,
+		Cache:      s.cache,
+	})
 	if err != nil {
 		return 0, err
 	}
-	req.Header.Set("TTL", "60")
 
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return 0, err
+	sendOnce := func() (int, time.Duration, error) {
+		var body io.Reader
+		if len(enc.Payload) > 0 {
+			body = bytes.NewReader(enc.Payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, sub.Endpoint, body)
+		if err != nil {
+			return 0, 0, err
+		}
+		for k, v := range enc.Headers {
+			req.Header.Set(k, v)
+		}
+
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return 0, 0, err
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+
+		var retryAfter time.Duration
+		if raHeader := resp.Header.Get("Retry-After"); raHeader != "" {
+			if secs, parseErr := strconv.Atoi(strings.TrimSpace(raHeader)); parseErr == nil && secs > 0 {
+				retryAfter = time.Duration(secs) * time.Second
+			}
+		}
+		return resp.StatusCode, retryAfter, nil
 	}
-	defer resp.Body.Close()
 
-	return resp.StatusCode, nil
+	statusCode, retryAfter, err := sendOnce()
+	if err == nil && (statusCode == http.StatusTooManyRequests || (statusCode >= 500 && statusCode <= 599)) {
+		wait := retryAfter
+		if wait <= 0 {
+			wait = 10 * time.Millisecond
+		}
+		if s.maxRetryDelay > 0 && wait > s.maxRetryDelay {
+			wait = s.maxRetryDelay
+		}
+
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-time.After(wait):
+		}
+
+		statusCode, _, err = sendOnce()
+	}
+
+	return statusCode, err
 }
 
 // PoolConfig configures the dispatch worker pool.
@@ -79,6 +167,7 @@ type PoolConfig struct {
 	DrainTimeout time.Duration // shutdown.drain_timeout (default 10s)
 	Store        *store.Store
 	Sender       Sender
+	Cache        *webpush.KeypairCache
 	Metrics      *obs.Metrics
 	NowFunc      func() time.Time // clock abstraction for testing
 }
@@ -90,6 +179,7 @@ type Pool struct {
 	drainTimeout time.Duration
 	store        *store.Store
 	sender       Sender
+	cache        *webpush.KeypairCache
 	metrics      *obs.Metrics
 	nowFunc      func() time.Time
 
@@ -123,6 +213,11 @@ func NewPool(cfg PoolConfig) *Pool {
 		nowFunc = time.Now
 	}
 
+	cache := cfg.Cache
+	if cache == nil {
+		cache = webpush.NewKeypairCache()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &Pool{
@@ -131,9 +226,10 @@ func NewPool(cfg PoolConfig) *Pool {
 		drainTimeout: drainTimeout,
 		store:        cfg.Store,
 		sender:       sender,
+		cache:        cache,
 		metrics:      cfg.Metrics,
 		nowFunc:      nowFunc,
-		jobCh:        make(chan DispatchJob, 1024),
+		jobCh:        make(chan DispatchJob, 16384),
 		ctx:          ctx,
 		cancel:       cancel,
 		stopped:      make(chan struct{}),
@@ -229,7 +325,35 @@ func (p *Pool) dispatchToSub(ctx context.Context, sub Subscription, job Dispatch
 	// (docs/DELIVERY.md & AGENTS.md Invariant 4)
 	sendStartDay := core.Today().Int()
 
-	statusCode, err := p.sender.Send(ctx, sub, nil)
+	var payload []byte
+	if job.DigestCount > 1 {
+		payload = []byte(fmt.Sprintf(`{"n":%d}`, job.DigestCount))
+	}
+
+	statusCode, err := p.sender.Send(ctx, sub, payload)
+
+	if p.metrics != nil {
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				p.metrics.IncPushFailures(obs.PushFailureCodeTimeout)
+			} else {
+				p.metrics.IncPushFailures(obs.PushFailureCodeNetErr)
+			}
+		} else {
+			switch {
+			case statusCode == 400:
+				p.metrics.IncPushFailures(obs.PushFailureCode400)
+			case statusCode == 404:
+				p.metrics.IncPushFailures(obs.PushFailureCode404)
+			case statusCode == 410:
+				p.metrics.IncPushFailures(obs.PushFailureCode410)
+			case statusCode == 429:
+				p.metrics.IncPushFailures(obs.PushFailureCode429)
+			case statusCode >= 500 && statusCode <= 599:
+				p.metrics.IncPushFailures(obs.PushFailureCode5xx)
+			}
+		}
+	}
 
 	// INVARIANT 4 (AGENTS.md Invariant 4):
 	// Prune on authoritative rejection only: Web Push 404 or 410.
@@ -237,8 +361,13 @@ func (p *Pool) dispatchToSub(ctx context.Context, sub Subscription, job Dispatch
 	// Delete by exact endpoint AND only if the row predates the failed send:
 	// DELETE FROM subscriptions WHERE endpoint = ? AND created_day <= ?
 	if statusCode == http.StatusNotFound || statusCode == http.StatusGone {
-		_ = p.store.Write(context.Background(), func(tx *sql.Tx) error {
-			_, err := tx.ExecContext(context.Background(),
+		if p.cache != nil {
+			p.cache.Remove(sub.Endpoint)
+		}
+		writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = p.store.Write(writeCtx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(writeCtx,
 				"DELETE FROM subscriptions WHERE endpoint = ? AND created_day <= ?",
 				sub.Endpoint, sendStartDay)
 			return err
@@ -248,8 +377,10 @@ func (p *Pool) dispatchToSub(ctx context.Context, sub Subscription, job Dispatch
 
 	// Successful send: update last_ok_day
 	if err == nil && (statusCode >= 200 && statusCode < 300) {
-		_ = p.store.Write(context.Background(), func(tx *sql.Tx) error {
-			_, err := tx.ExecContext(context.Background(),
+		writeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = p.store.Write(writeCtx, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(writeCtx,
 				"UPDATE subscriptions SET last_ok_day = ? WHERE id = ?",
 				sendStartDay, sub.ID)
 			return err

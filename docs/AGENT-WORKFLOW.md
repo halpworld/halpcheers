@@ -227,6 +227,27 @@ repository can orient immediately without re-auditing the tree.
     generator and warrant canary documentation.
   * **Verification**: `server/internal/http/phase3_test.go`, `tui/bot_test.go`,
     and `redteam/phase3_redteam_test.go`.
+* **Production Readiness & Edge Hardening** *(Complete — Decision #54)*:
+  * **Web Push VAPID & RFC 8291/8188 Dispatch (`server/internal/push/`)**:
+    `DefaultSender` signs every Web Push request with ES256 VAPID, sends
+    payloadless bodies for `DigestCount == 1`, encrypts `{"n":count}` for
+    `DigestCount > 1`, retries once on `429`/`5xx` honouring `Retry-After`,
+    bounds `KeypairCache` to `100,000` entries (Invariant 8), and evicts cached
+    keys alongside SQLite rows (`created_day <= sendStartDay`) on `404`/`410`
+    (Invariant 4).
+  * **Full Subsystem Config & Graceful Drain (`server/internal/http/assemble.go`,
+    `server/internal/http/middleware.go`, `server/cmd/halpd/main.go`)**: Wires all
+    `cfg.Startup.*` and `cfg.Reloadable().*` settings (`guard`, `pow`, `coalesce`,
+    `push`, `stream`), persists VAPID keys (`HALP_VAPID_KEY_FILE` with `0600`
+    mode), exempts SSE routes from `TimeoutMiddleware` while preserving
+    `http.Flusher` through `AccessLogMiddleware`, drains `Queue` +
+    `Coalescer.FlushAll()` on `SIGTERM`, and runs a 6-hour maintenance ticker
+    for expired `blocks` and ancient `subscriptions`.
+  * **Edge Deployment & Runbook (`docker-compose.yml`, `Caddyfile`,
+    `halp.toml.example`, `docs/OPERATIONS.md`)**: Loopback-only `127.0.0.1:8080`
+    binding on `halpd`, Caddy TLS termination with `flush_interval -1` SSE
+    streaming, `/metrics` `403` gate, and log scrubbing of IPs, `User-Agent`, and
+    query strings (Invariant 9).
 
 ### Guardrails & tooling notes for future agents
 

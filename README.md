@@ -28,6 +28,7 @@ The full design and specification live in [`docs/`](docs/):
 | [docs/GROUPS.md](docs/GROUPS.md) | Teams and group-scoped handles |
 | [docs/SHARING.md](docs/SHARING.md) | Links, QR, badges, live-stream overlays |
 | [docs/TRANSPARENCY.md](docs/TRANSPARENCY.md) | Public transparency report, warrant canary, architectural impossibility |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Production deployment, host tuning, Caddy, WAL backups, runbook |
 | [docs/PRIVACY.md](docs/PRIVACY.md) | GDPR posture and data inventory |
 | [docs/API.md](docs/API.md) | HTTP surface and SQLite schema |
 | [docs/UI.md](docs/UI.md) | UI and UX spec — copy, states, what no screen may show |
@@ -46,6 +47,21 @@ Halp is written in pure Go (`CGO_ENABLED=0`) with zero external runtime C depend
 ```bash
 # Start the HTTP server with SQLite (listens on :8080 by default)
 go run ./server/cmd/halpd
+
+# Or run with custom production configuration
+go run ./server/cmd/halpd -config halp.toml
+```
+
+### Production Deployment (Docker Compose & Caddy)
+
+See [docs/OPERATIONS.md](docs/OPERATIONS.md) for complete host tuning, systemd, and monitoring runbooks. A production Docker Compose stack with Caddy reverse proxy (enforcing Invariant 9 zero-identifier logging and unbuffered SSE streaming) is ready to deploy:
+
+```bash
+# Copy production configuration template
+cp halp.toml.example halp.toml
+
+# Start halpd daemon and Caddy reverse proxy
+docker compose up -d
 ```
 
 ### Running the TUI Client

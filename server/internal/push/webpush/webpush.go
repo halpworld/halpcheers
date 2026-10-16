@@ -12,12 +12,16 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -44,16 +48,28 @@ type CachedSubscriptionSecret struct {
 	IKM          []byte // 32-byte derived IKM
 }
 
+const DefaultKeypairCacheSize = 100_000
+
 // KeypairCache provides thread-safe in-memory caching of ECDH shared secrets per subscription endpoint.
 type KeypairCache struct {
-	mu    sync.RWMutex
-	items map[string]*CachedSubscriptionSecret
+	mu      sync.RWMutex
+	items   map[string]*CachedSubscriptionSecret
+	maxSize int
 }
 
-// NewKeypairCache creates a new empty KeypairCache.
+// NewKeypairCache creates a new empty KeypairCache with default capacity (100,000).
 func NewKeypairCache() *KeypairCache {
+	return NewKeypairCacheWithCapacity(DefaultKeypairCacheSize)
+}
+
+// NewKeypairCacheWithCapacity creates a new KeypairCache with bounded capacity.
+func NewKeypairCacheWithCapacity(maxSize int) *KeypairCache {
+	if maxSize <= 0 {
+		maxSize = DefaultKeypairCacheSize
+	}
 	return &KeypairCache{
-		items: make(map[string]*CachedSubscriptionSecret),
+		items:   make(map[string]*CachedSubscriptionSecret),
+		maxSize: maxSize,
 	}
 }
 
@@ -75,6 +91,12 @@ func (c *KeypairCache) Put(endpoint string, secret *CachedSubscriptionSecret) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if _, exists := c.items[endpoint]; !exists && len(c.items) >= c.maxSize {
+		for k := range c.items {
+			delete(c.items, k)
+			break
+		}
+	}
 	c.items[endpoint] = secret
 }
 
@@ -492,3 +514,93 @@ func VerifyVAPID(authHeader string, expectedAudience string) (sub string, exp in
 
 	return claims.Sub, claims.Exp, nil
 }
+
+// LoadOrGenerateVAPIDKey loads a P-256 private key from rawScalarB64, or filePath,
+// or generates a fresh key and persists it to filePath with 0600 permissions.
+// Returns the private key and base64.RawURLEncoding of the uncompressed 65-byte public key.
+func LoadOrGenerateVAPIDKey(rawScalarB64, filePath string) (*ecdsa.PrivateKey, string, error) {
+	if rawScalarB64 == "" && filePath != "" {
+		if _, err := os.Stat(filePath); err == nil {
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				return nil, "", fmt.Errorf("failed reading VAPID key file: %w", err)
+			}
+			rawScalarB64 = strings.TrimSpace(string(data))
+		}
+	}
+
+	if rawScalarB64 != "" {
+		var scalar []byte
+
+		if s, decErr := base64.RawURLEncoding.DecodeString(rawScalarB64); decErr == nil {
+			scalar = s
+		} else if s, decErr := base64.URLEncoding.DecodeString(rawScalarB64); decErr == nil {
+			scalar = s
+		} else if s, decErr := base64.RawStdEncoding.DecodeString(rawScalarB64); decErr == nil {
+			scalar = s
+		} else if s, decErr := base64.StdEncoding.DecodeString(rawScalarB64); decErr == nil {
+			scalar = s
+		} else if s, decErr := hex.DecodeString(rawScalarB64); decErr == nil {
+			scalar = s
+		} else {
+			return nil, "", fmt.Errorf("failed decoding VAPID private key scalar: %w", decErr)
+		}
+
+		if len(scalar) > 32 {
+			return nil, "", errors.New("VAPID private key scalar exceeds 32 bytes")
+		}
+		if len(scalar) < 32 {
+			padded := make([]byte, 32)
+			copy(padded[32-len(scalar):], scalar)
+			scalar = padded
+		}
+
+		ecdhPriv, err := ecdh.P256().NewPrivateKey(scalar)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid P-256 scalar: %w", err)
+		}
+
+		ecdhPubBytes := ecdhPriv.PublicKey().Bytes()
+		pubKey, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), ecdhPubBytes)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed parsing uncompressed public key: %w", err)
+		}
+
+		privKey := &ecdsa.PrivateKey{
+			PublicKey: *pubKey,
+			D:         new(big.Int).SetBytes(scalar),
+		}
+
+		pubKeyB64URL := base64.RawURLEncoding.EncodeToString(ecdhPubBytes)
+		return privKey, pubKeyB64URL, nil
+	}
+
+	// Generate fresh P-256 key
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed generating VAPID key: %w", err)
+	}
+
+	dBytes := privKey.D.Bytes()
+	scalar := make([]byte, 32)
+	copy(scalar[32-len(dBytes):], dBytes)
+
+	if filePath != "" {
+		if dir := filepath.Dir(filePath); dir != "" && dir != "." {
+			_ = os.MkdirAll(dir, 0700)
+		}
+		scalarB64 := base64.RawURLEncoding.EncodeToString(scalar)
+		if err := os.WriteFile(filePath, []byte(scalarB64+"\n"), 0600); err != nil {
+			return nil, "", fmt.Errorf("failed saving VAPID key: %w", err)
+		}
+	}
+
+	ecdhPub, err := privKey.PublicKey.ECDH()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed converting public key to ecdh: %w", err)
+	}
+
+	pubKeyB64URL := base64.RawURLEncoding.EncodeToString(ecdhPub.Bytes())
+	return privKey, pubKeyB64URL, nil
+}
+
