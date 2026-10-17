@@ -586,3 +586,120 @@ func TestCacheInvalidationOnGone(t *testing.T) {
 		t.Fatalf("expected cache entry to be invalidated on 410 Gone")
 	}
 }
+
+// TestIsAuthoritativeRejection verifies the authoritative rejection matrix
+// per AGENTS.md Invariant 4 for webpush, apns, and fcm, as well as pool dispatch pruning.
+func TestIsAuthoritativeRejection(t *testing.T) {
+	matrixCases := []struct {
+		kind       string
+		statusCode int
+		expected   bool
+	}{
+		// webpush: 404 and 410 are authoritative rejections
+		{"webpush", http.StatusNotFound, true},
+		{"webpush", http.StatusGone, true},
+		{"webpush", http.StatusOK, false},
+		{"webpush", http.StatusBadRequest, false},
+		{"webpush", http.StatusTooManyRequests, false},
+		{"webpush", http.StatusInternalServerError, false},
+		{"webpush", http.StatusServiceUnavailable, false},
+
+		// apns: only 410 Gone is authoritative Unregistered; 404 is bad path
+		{"apns", http.StatusGone, true},
+		{"apns", http.StatusNotFound, false},
+		{"apns", http.StatusOK, false},
+		{"apns", http.StatusBadRequest, false},
+		{"apns", http.StatusTooManyRequests, false},
+		{"apns", http.StatusInternalServerError, false},
+
+		// fcm: 404 Not Found and 410 Gone are authoritative registration-token-not-registered
+		{"fcm", http.StatusNotFound, true},
+		{"fcm", http.StatusGone, true},
+		{"fcm", http.StatusOK, false},
+		{"fcm", http.StatusBadRequest, false},
+		{"fcm", http.StatusTooManyRequests, false},
+		{"fcm", http.StatusInternalServerError, false},
+
+		// default / untyped: falls back to 404 and 410
+		{"", http.StatusNotFound, true},
+		{"", http.StatusGone, true},
+		{"", http.StatusOK, false},
+		{"", http.StatusTooManyRequests, false},
+		{"", http.StatusInternalServerError, false},
+	}
+
+	for _, mc := range matrixCases {
+		actual := push.IsAuthoritativeRejection(mc.kind, mc.statusCode)
+		if actual != mc.expected {
+			t.Errorf("IsAuthoritativeRejection(%q, %d) = %v; expected %v",
+				mc.kind, mc.statusCode, actual, mc.expected)
+		}
+	}
+
+	// End-to-end pool dispatch pruning test across kinds
+	t.Run("Pool APNs and FCM pruning behavior", func(t *testing.T) {
+		st := setupTestStore(t)
+		ctx := context.Background()
+
+		acc, err := st.CreateAccount(ctx, []byte("hash_kinds"), "eu-1")
+		if err != nil {
+			t.Fatalf("create account: %v", err)
+		}
+
+		today := core.Today().Int()
+		mockSender := NewMockSender()
+
+		subCases := []struct {
+			kind        string
+			subPath     string
+			respCode    int
+			shouldPrune bool
+		}{
+			{"apns", "/apns/404", http.StatusNotFound, false},
+			{"apns", "/apns/410", http.StatusGone, true},
+			{"fcm", "/fcm/404", http.StatusNotFound, true},
+			{"fcm", "/fcm/410", http.StatusGone, true},
+			{"fcm", "/fcm/503", http.StatusServiceUnavailable, false},
+		}
+
+		for _, sc := range subCases {
+			targetURL := "https://push.example.com" + sc.subPath
+			err := st.Write(ctx, func(tx *sql.Tx) error {
+				_, err := tx.Exec("INSERT INTO subscriptions (account_id, kind, endpoint, created_day) VALUES (?, ?, ?, ?)",
+					acc.Int64(), sc.kind, targetURL, today)
+				return err
+			})
+			if err != nil {
+				t.Fatalf("insert sub for %s: %v", sc.subPath, err)
+			}
+			mockSender.SetResponse(targetURL, sc.respCode, nil)
+		}
+
+		pool := push.NewPool(push.PoolConfig{
+			Workers: 1,
+			Store:   st,
+			Sender:  mockSender,
+		})
+
+		pool.QueueJob(push.DispatchJob{
+			Recipient:   acc,
+			DigestCount: 1,
+			EnqueuedAt:  time.Now(),
+		})
+		_ = pool.Stop()
+
+		for _, sc := range subCases {
+			targetURL := "https://push.example.com" + sc.subPath
+			var count int
+			_ = st.ReadDB().QueryRowContext(ctx,
+				"SELECT COUNT(*) FROM subscriptions WHERE endpoint = ?", targetURL).Scan(&count)
+
+			if sc.shouldPrune && count != 0 {
+				t.Fatalf("[%s %d] expected subscription to be pruned, but found %d rows", sc.kind, sc.respCode, count)
+			}
+			if !sc.shouldPrune && count != 1 {
+				t.Fatalf("[%s %d] expected subscription to survive, but count was %d", sc.kind, sc.respCode, count)
+			}
+		}
+	})
+}

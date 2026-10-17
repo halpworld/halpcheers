@@ -23,7 +23,10 @@ services:
     restart: unless-stopped
 
   caddy:
-    image: caddy:2-alpine
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    image: halp-caddy:latest
     ports:
       - "80:80"
       - "443:443"

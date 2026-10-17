@@ -319,6 +319,23 @@ func (p *Pool) processJob(job DispatchJob) {
 	}
 }
 
+// IsAuthoritativeRejection reports whether a push response represents an authoritative
+// permanent token/subscription rejection under AGENTS.md Invariant 4:
+// - webpush (or default): HTTP 404 Not Found or 410 Gone
+// - apns: HTTP 410 Gone (Unregistered)
+// - fcm: HTTP 404 Not Found or 410 Gone (UNREGISTERED / registration-token-not-registered)
+// Transient errors (429, 5xx, 400, network timeouts) NEVER return true.
+func IsAuthoritativeRejection(kind string, statusCode int) bool {
+	switch kind {
+	case "apns":
+		return statusCode == http.StatusGone
+	case "fcm", "webpush":
+		return statusCode == http.StatusNotFound || statusCode == http.StatusGone
+	default:
+		return statusCode == http.StatusNotFound || statusCode == http.StatusGone
+	}
+}
+
 // dispatchToSub sends a push notification and enforces exact token pruning (Invariant 4).
 func (p *Pool) dispatchToSub(ctx context.Context, sub Subscription, job DispatchJob) {
 	// CRITICAL: Capture send_start_day BEFORE dispatch request leaves
@@ -356,11 +373,11 @@ func (p *Pool) dispatchToSub(ctx context.Context, sub Subscription, job Dispatch
 	}
 
 	// INVARIANT 4 (AGENTS.md Invariant 4):
-	// Prune on authoritative rejection only: Web Push 404 or 410.
+	// Prune on authoritative rejection only: Web Push 404 or 410; Phase 4 APNs 410, FCM 404/410.
 	// Never prune on 429, 500, 502, 503, timeout, or DNS failure.
 	// Delete by exact endpoint AND only if the row predates the failed send:
 	// DELETE FROM subscriptions WHERE endpoint = ? AND created_day <= ?
-	if statusCode == http.StatusNotFound || statusCode == http.StatusGone {
+	if IsAuthoritativeRejection(sub.Kind, statusCode) {
 		if p.cache != nil {
 			p.cache.Remove(sub.Endpoint)
 		}

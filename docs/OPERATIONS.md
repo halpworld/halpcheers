@@ -68,6 +68,7 @@ vm.max_map_count = 262144
 The repository provides [`docker-compose.yml`](file:///Users/kenth/.gemini/antigravity/worktrees/halpcheers/continue_documentation_driven_development/docker-compose.yml), a production Compose definition coupling `halpd` with a hardened Caddy reverse proxy.
 
 * **Loopback Binding (Invariant 9):** `halpd` binds strictly to host loopback (`127.0.0.1:8080:8080`). Direct inbound access from the public Internet is blocked, ensuring all external traffic passes through Caddy for TLS termination, header/IP scrubbing, and `/metrics` access gating.
+* **Full-Stack Edge Container (`web/Dockerfile`):** Multi-stage build compiles TypeScript packages (`@halp/core` and `@halp/app`) and packages static web assets directly into `halp-caddy:latest`. Caddy serves the landing page (`/`), web app (`/app`, `/index.html`), Service Worker (`/sw.js` with `Service-Worker-Allowed: /`), and static assets (`/dist/*`, `/assets/*`), while proxying API routes (`/v1/*`, `/h/*`, `/@*`, `/badge/*`, `/overlay/*`, `/healthz`, `/readyz`) to `halpd:8080`.
 * **Configuration Mount & SIGHUP Reload:** The container mounts `/etc/halp/halp.toml` and sets `HALP_CONFIG_FILE=/etc/halp/halp.toml`, enabling atomic runtime reloads via `docker kill -s HUP`.
 
 #### 1. Directory Structure
@@ -101,8 +102,10 @@ HALP_VAPID_SUBSCRIBER=mailto:ops@halp.to
 
 #### 4. Launch Services
 
+Build and launch the full-stack container environment:
+
 ```bash
-docker compose up -d
+docker compose up -d --build
 ```
 
 #### 5. VAPID Key Retrieval

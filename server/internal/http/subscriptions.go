@@ -3,6 +3,7 @@ package http
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -49,6 +50,30 @@ func (h *SubscriptionsHandler) getAccount(r *http.Request) (core.AccountID, bool
 	return 1001, true
 }
 
+func decodeSubKey(s string) []byte {
+	if s == "" {
+		return nil
+	}
+	if len(s)%2 == 0 {
+		if b, err := hex.DecodeString(s); err == nil && len(b) > 0 {
+			return b
+		}
+	}
+	if b, err := base64.RawURLEncoding.DecodeString(s); err == nil && len(b) > 0 {
+		return b
+	}
+	if b, err := base64.URLEncoding.DecodeString(s); err == nil && len(b) > 0 {
+		return b
+	}
+	if b, err := base64.RawStdEncoding.DecodeString(s); err == nil && len(b) > 0 {
+		return b
+	}
+	if b, err := base64.StdEncoding.DecodeString(s); err == nil && len(b) > 0 {
+		return b
+	}
+	return []byte(s)
+}
+
 // CreateSubscription registers or updates a push subscription.
 // POST /v1/subscriptions
 func (h *SubscriptionsHandler) CreateSubscription(w http.ResponseWriter, r *http.Request) {
@@ -57,7 +82,7 @@ func (h *SubscriptionsHandler) CreateSubscription(w http.ResponseWriter, r *http
 		return
 	}
 
-	accountID, ok := h.getAccount(r)
+	accID, ok := h.getAccount(r)
 	if !ok {
 		WriteUniformError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -81,15 +106,13 @@ func (h *SubscriptionsHandler) CreateSubscription(w http.ResponseWriter, r *http
 	if req.Kind == "" {
 		req.Kind = "webpush"
 	}
+	if req.Kind != "webpush" && req.Kind != "apns" && req.Kind != "fcm" {
+		WriteUniformError(w, http.StatusBadRequest, "invalid_kind")
+		return
+	}
 
-	p256dhBytes, _ := hex.DecodeString(req.P256DH)
-	if len(p256dhBytes) == 0 && len(req.P256DH) > 0 {
-		p256dhBytes = []byte(req.P256DH)
-	}
-	authBytes, _ := hex.DecodeString(req.Auth)
-	if len(authBytes) == 0 && len(req.Auth) > 0 {
-		authBytes = []byte(req.Auth)
-	}
+	p256dhBytes := decodeSubKey(req.P256DH)
+	authBytes := decodeSubKey(req.Auth)
 
 	today := core.Today().Int()
 	var subID int64
@@ -104,7 +127,7 @@ func (h *SubscriptionsHandler) CreateSubscription(w http.ResponseWriter, r *http
 				p256dh = excluded.p256dh,
 				auth = excluded.auth,
 				created_day = excluded.created_day
-		`, accountID.Int64(), req.Kind, req.Endpoint, p256dhBytes, authBytes, today)
+		`, accID.Int64(), req.Kind, req.Endpoint, p256dhBytes, authBytes, today)
 		if err != nil {
 			return err
 		}
@@ -133,7 +156,7 @@ func (h *SubscriptionsHandler) DeleteSubscription(w http.ResponseWriter, r *http
 		return
 	}
 
-	accountID, ok := h.getAccount(r)
+	accID, ok := h.getAccount(r)
 	if !ok {
 		WriteUniformError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -149,7 +172,7 @@ func (h *SubscriptionsHandler) DeleteSubscription(w http.ResponseWriter, r *http
 	_ = h.store.Write(r.Context(), func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(r.Context(),
 			"DELETE FROM subscriptions WHERE id = ? AND account_id = ?",
-			subID, accountID.Int64())
+			subID, accID.Int64())
 		return err
 	})
 

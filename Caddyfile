@@ -39,10 +39,27 @@
 	}
 	respond @metrics 403
 
-	# Reverse proxy to halpd backend.
+	# Backend API and public dynamic endpoints proxied to halpd container.
 	# flush_interval -1 disables proxy buffering so Server-Sent Events (/v1/stream, /overlay/*)
 	# are flushed to subscribers with sub-millisecond arrival latency.
-	reverse_proxy halpd:8080 {
+	@backend {
+		path /v1/* /h/* /@* /badge/* /overlay/* /healthz /readyz
+	}
+	reverse_proxy @backend halpd:8080 {
 		flush_interval -1
 	}
+
+	# Static web app root
+	root * /srv/www
+
+	# Service worker routing and scope header
+	header /sw.js Service-Worker-Allowed "/"
+	rewrite /sw.js /dist/sw.js
+
+	# Frontend route rewrites
+	rewrite /app /index.html
+	rewrite / /landing.html
+
+	# Static web asset file server
+	file_server
 }

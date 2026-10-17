@@ -97,7 +97,8 @@ Deliberately last and explicitly conditional. Decide with real data from phases
 * APNs and FCM integration, quotas, and the (very different) token-pruning
   feedback paths.
 
-`mobile/` exists as a placeholder until then.
+The evaluation criteria, client framework tradeoffs, and backend APNs/FCM foundation
+(Decision #55) are documented in [`mobile/README.md`](../mobile/README.md).
 
 ## Non-goals, permanently
 

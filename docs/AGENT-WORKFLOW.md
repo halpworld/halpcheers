@@ -248,6 +248,21 @@ repository can orient immediately without re-auditing the tree.
     binding on `halpd`, Caddy TLS termination with `flush_interval -1` SSE
     streaming, `/metrics` `403` gate, and log scrubbing of IPs, `User-Agent`, and
     query strings (Invariant 9).
+* **Full-Stack Edge Packaging & Phase 4 Mobile Foundation** *(Complete — Decision #55)*:
+  * **Unified Edge Container (`web/Dockerfile`, `Caddyfile`, `docker-compose.yml`)**:
+    Multi-stage build compiles `@halp/core` and `@halp/app` TypeScript bundles via
+    Node 22 and packages static assets directly into the Caddy edge image
+    (`halp-caddy:latest`). Caddy handles edge routing: `/` -> `/landing.html`,
+    `/app` -> `/index.html`, `/sw.js` -> `/dist/sw.js` with `Service-Worker-Allowed: /`,
+    static asset delivery, and proxying backend routes (`/v1/*`, `/h/*`, `/@*`,
+    `/badge/*`, `/overlay/*`, `/healthz`, `/readyz`) to `halpd:8080` with
+    `flush_interval -1` (real-time SSE streaming).
+  * **Phase 4 Mobile Placeholder & APNs/FCM Foundation (`mobile/README.md`)**:
+    Documents Apple App Store Guideline 4.2 minimum functionality gating, push-spam
+    review policies, and evaluates Tauri v2 Mobile vs thin native SwiftUI/Kotlin shells.
+    Documents server database schema (`subscriptions(kind, endpoint, p256dh, auth)`)
+    supporting `kind: "apns"` and `kind: "fcm"` alongside Web Push with Invariant 4
+    race-safe pruning (`created_day <= sendStartDay`).
 
 ### Guardrails & tooling notes for future agents
 
@@ -272,8 +287,9 @@ repository can orient immediately without re-auditing the tree.
 * **Phase 3 (Parked item)**: Second region (`docs/DISCOVERY.md`, Decision 22) —
   explicitly parked unless cross-region demand and a privacy review warrant
   changing the single-region (`eu-1`) guarantee.
-* **Phase 4 — Mobile, if feasible (`mobile/`)**: Conditional on App Store / Play
-  Store viability for a contentless appreciation-ping app, choice of Tauri v2
-  mobile vs thin native shells, and APNs/FCM push dispatcher + token-pruning
-  integration.
+* **Phase 4 — Mobile, if feasible (`mobile/README.md`, Decision #55)**:
+  Conditional on App Store / Play Store viability for a contentless
+  appreciation-ping app, choice of Tauri v2 mobile vs thin native shells, and
+  APNs/FCM push dispatcher integration. See [`mobile/README.md`](../mobile/README.md).
+
 
