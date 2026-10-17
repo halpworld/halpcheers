@@ -97,7 +97,7 @@ jobs:
           prerelease: false
 
       - name: Upload Platform Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: halp-desktop-${{ matrix.platform.name }}
           path: |
