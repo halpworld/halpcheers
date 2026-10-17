@@ -3,7 +3,7 @@ module github.com/halpworld/halpcheers/server
 go 1.26.0
 
 require (
-	github.com/go-chi/chi/v5 v5.2.1
+	github.com/go-chi/chi/v5 v5.5.0
 	github.com/prometheus/client_golang v1.21.1
 	golang.org/x/crypto v0.57.0
 	modernc.org/sqlite v1.59.0
