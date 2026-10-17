@@ -1,0 +1,64 @@
+name: Feature Request
+description: Propose an enhancement or new capability for Halp
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### Halp Product Scope & Permanent Non-Goals
+        > **"Send a person an anonymous 'someone appreciates you' ping. Nothing else, ever."** — [`AGENTS.md`](../AGENTS.md)
+        >
+        > The following are **permanent non-goals**. Do not request or propose them:
+        > *Messages, replies, text, images, reactions, profiles, avatars, followers, feeds, leaderboards, read receipts, sender reveal, ads, third-party analytics SDKs.*
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement / Use Case
+      description: What user problem or workflow are you addressing?
+      placeholder: Describe the context and why current features do not satisfy this need.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution & Interface
+      description: Describe the proposed design, API endpoints, or UI changes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: abuse-analysis
+    attributes:
+      label: Abuse & Amplification Analysis (Invariant 5)
+      description: |
+        Abuse prevention ships with the feature, not after it. Any change that adds a way to reach a user must land together with its rate limits and revocation path (see `docs/ABUSE.md`).
+        Please specify:
+        1. How could a malicious actor use or amplify this feature to harass a user or flood the network?
+        2. What rate-limiting buckets, Bloom filter cascade slots, or cooldowns are required?
+        3. What is the immediate revocation or burn path for the recipient?
+      placeholder: |
+        - Threat / amplification vectors:
+        - Rate limits and memory bounding:
+        - Revocation and blocking mechanism:
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: invariant-verification
+    attributes:
+      label: Invariant & Scope Discipline Verification
+      description: Confirm that this proposal honors all architectural invariants.
+      options:
+        - label: Does NOT propose messages, text, replies, reactions, profiles, avatars, feeds, or read receipts.
+          required: true
+        - label: Never reveals the sender and introduces zero timing or existence oracles (Invariants 6 & 7).
+          required: true
+        - label: Does NOT record pings or create persistent message/ping logs (Invariant 1).
+          required: true
+        - label: Allocations are fixed-size and bounded from config at startup (Invariant 8).
+          required: true
+        - label: Uses zero external origins, CDNs, or telemetry SDKs (Invariants 3 & 9).
+          required: true

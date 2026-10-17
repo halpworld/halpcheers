@@ -31,7 +31,7 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      - HALP_DOMAIN=${HALP_DOMAIN:-localhost}
+      - HALP_DOMAIN=${HALP_DOMAIN:-http://localhost}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

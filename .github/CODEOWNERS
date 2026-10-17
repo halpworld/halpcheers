@@ -1,0 +1,32 @@
+# Halp Codeowners File
+# Governed by docs/AGENT-WORKFLOW.md §2 (Ownership Map) and AGENTS.md
+
+# Global fallback
+* @halpworld/maintainers
+
+# Core Specifications and Architecture
+/AGENTS.md @halpworld/maintainers
+/docs/ @halpworld/maintainers
+
+# ==============================================================================
+# FROZEN CONTRACTS (Wave 0)
+# DO NOT EDIT: These files are strictly frozen. Changes require an issue
+# discussion naming every impacted track, maintainer consensus, and a dedicated PR.
+# ==============================================================================
+/server/internal/core/ @halpworld/maintainers
+/server/internal/http/router.go @halpworld/maintainers
+
+# Backend Subsystems
+/server/ @halpworld/maintainers
+/tui/ @halpworld/maintainers
+/redteam/ @halpworld/maintainers
+/loadtest/ @halpworld/maintainers
+
+# Client Subsystems
+/web/ @halpworld/maintainers
+/extension/ @halpworld/maintainers
+/desktop/ @halpworld/maintainers
+/mobile/ @halpworld/maintainers
+
+# CI / CD & Repository Configuration
+/.github/ @halpworld/maintainers

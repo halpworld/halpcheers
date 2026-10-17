@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Disclosure
+    url: https://github.com/halpworld/halpcheers/security/policy
+    about: Please report security vulnerabilities privately. Do NOT open public issues for exploitable bugs.
+  - name: Architecture & Specification Documentation
+    url: https://github.com/halpworld/halpcheers/tree/main/docs
+    about: Read the architectural specifications, privacy invariants, and security threat models governing Halp.
+  - name: Open Questions & Decisions Log
+    url: https://github.com/halpworld/halpcheers/blob/main/docs/OPEN-QUESTIONS.md
+    about: Review logged decisions and trade-offs before proposing design changes.

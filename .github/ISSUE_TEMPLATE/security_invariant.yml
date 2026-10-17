@@ -1,0 +1,63 @@
+name: Security & Invariant Audit
+description: Report an invariant gap, defense-in-depth weakness, or red-team test case
+title: "[Security/Invariant]: "
+labels: ["security", "invariant"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!WARNING]
+        > **CRITICAL SECURITY DISCLOSURE**: If you have discovered an actively exploitable vulnerability in production that puts user privacy or infrastructure at risk, please report it privately via GitHub Security Advisories or by emailing security per [`SECURITY.md`](../SECURITY.md).
+        >
+        > Use this issue template for architectural invariant gaps, red-team test cases, defense-in-depth proposals, and invariant verification improvements.
+
+  - type: dropdown
+    id: invariant
+    attributes:
+      label: Invariant Affected
+      description: Which non-negotiable invariant or contract does this report address?
+      options:
+        - "Invariant 1: No message records (ephemeral memory only, blocks table sole exception)"
+        - "Invariant 2: Never make a synchronous push call in HTTP handler (< 3 ms latency)"
+        - "Invariant 3: No heavy frameworks (minimal stdlib crypto/SQL, RFC 8291/8188 in-house)"
+        - "Invariant 4: Token lifecycle hygiene (pruning only on authoritative 404/410, race-safe)"
+        - "Invariant 5: Abuse prevention ships with the feature (rate limits & revocation paths)"
+        - "Invariant 6: Never reveal the sender (zero sender identity anywhere)"
+        - "Invariant 7: Enforcement is invisible to the sender (uniform 202, zero oracles)"
+        - "Invariant 8: Fixed-size allocations for anything keyed by user input (bounded memory)"
+        - "Invariant 9: No identifiers in logs or metrics (AST linter enforcement)"
+        - "Frozen Contract: server/internal/core/ or server/internal/http/router.go"
+        - "Other Architectural Guardrail"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Invariant Gap or Weakness Description
+      description: Describe how the invariant could be stressed, bypassed, or weakened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: test-case
+    attributes:
+      label: Proposed Red-Team Test Case / Reproduction
+      description: Provide a reproducible test scenario or test function suitable for `redteam/`.
+      placeholder: |
+        // Example test case outline:
+        func TestInvariantBoundaryEdgeCase(t *testing.T) {
+            // Setup ...
+            // Exercise boundary ...
+            // Assert invariant remains intact ...
+        }
+    validations:
+      required: true
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Proposed Mitigation & Defense-in-Depth
+      description: What architectural or code-level changes will permanently enforce this invariant?
+    validations:
+      required: true
