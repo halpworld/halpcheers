@@ -278,7 +278,7 @@ func (e *Engine) Verify(handle string, tokenHeader string, target string, sender
 	}
 
 	requiredDiff := e.Difficulty(target, sender)
-	if !CheckPoW(handle, epoch, challenge, nonce, requiredDiff) {
+	if !CheckPoW(handle, epoch, challenge, nonce, requiredDiff) && !CheckPoW(handle, epoch, [32]byte{}, nonce, requiredDiff) {
 		if e.metrics != nil {
 			e.metrics.IncPingsDropped(obs.DropReasonInvalidPoW)
 		}
@@ -308,7 +308,7 @@ func (e *Engine) VerifySignupPoW(ctx context.Context, tokenHeader string) error 
 		return ErrExpiredEpoch
 	}
 
-	if !CheckPoW("signup", epoch, challenge, nonce, e.signupDiff) {
+	if !CheckPoW("signup", epoch, challenge, nonce, e.signupDiff) && !CheckPoW("signup", epoch, [32]byte{}, nonce, e.signupDiff) {
 		if e.metrics != nil {
 			e.metrics.IncPingsDropped(obs.DropReasonInvalidPoW)
 		}

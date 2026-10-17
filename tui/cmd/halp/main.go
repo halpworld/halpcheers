@@ -66,7 +66,16 @@ func run(args []string) error {
 
 	// Interactive TUI / SSE Listener mode
 	existingKey, _ := client.LoadAccountKeyEncrypted(*keyFile)
+	isNewAccount := existingKey == ""
+	if isNewAccount {
+		if serverKey, err := c.CreateAccount(ctx, 0); err == nil && serverKey != "" {
+			existingKey = serverKey
+		}
+	}
 	model := ui.NewModel(existingKey, *bell)
+	if isNewAccount {
+		model.Screen = ui.ScreenKeyWall
+	}
 
 	if model.Screen == ui.ScreenKeyWall {
 		fmt.Print(model.View())
@@ -82,9 +91,13 @@ func run(args []string) error {
 	}
 
 	_ = c.LoginWithAccountKey(ctx, model.AccountKey)
-	if handles, err := c.ListHandles(ctx); err == nil {
-		model.Handles = handles
+	handles, err := c.ListHandles(ctx)
+	if err == nil && len(handles) == 0 {
+		if h, createErr := c.CreateHandle(ctx, "Terminal", "personal"); createErr == nil && h.Handle != "" {
+			handles = []client.HandleDTO{h}
+		}
 	}
+	model.Handles = handles
 	if pending, err := c.GetPending(ctx); err == nil && pending > 0 {
 		model = model.Update(ui.ArrivalMsg{Count: pending})
 	}
