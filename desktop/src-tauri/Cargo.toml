@@ -18,7 +18,7 @@ keyring = "2.1"
 aes-gcm = "0.10"
 sha2 = "0.10"
 hkdf = "0.12"
-rand = "0.8"
+rand = "0.10"
 
 [features]
 default = ["custom-protocol"]
